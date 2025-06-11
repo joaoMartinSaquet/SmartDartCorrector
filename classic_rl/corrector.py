@@ -11,7 +11,7 @@ import json
 import tqdm
 
 
-from classic_rl.deep_stuff import networks
+from classic_rl.policy import REINFORCEnet
 from common.user_simulator import *
 from common.perturbation import *
 from common.rolloutenv import *
@@ -120,9 +120,9 @@ class ReinforceCorrector(Corrector):
 
         # Neural networks for policy representation
         # Mean network: outputs the mean of the action distribution
-        self.mean_network = networks(n_input = 2, n_output = 2, layers = [32, 32]).to(self.device)
+        self.mean_network = REINFORCEnet(n_input = 2, n_output = 2, layers = [32, 32]).to(self.device)
         # Standard deviation network: outputs log std dev of the action distribution
-        self.std_network = networks(n_input = 2, n_output = 2, layers = [32, 32]).to(self.device)
+        self.std_network = REINFORCEnet(n_input = 2, n_output = 2, layers = [32, 32]).to(self.device)
 
         # Optimizer for both networks (combined parameter list)
         self.optimizer = optim.Adam(list(self.mean_network.parameters()) + list(self.std_network.parameters()), lr=self.learning_rate)

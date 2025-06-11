@@ -1,7 +1,7 @@
 
 from torch import nn
 
-class networks(nn.Module):
+class REINFORCEnet(nn.Module):
     def __init__(self, n_input = 2, n_output = 2, layers = [16, 16]):
         super().__init__()
         self.fa = nn.Tanh()
