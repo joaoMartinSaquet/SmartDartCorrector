@@ -170,8 +170,7 @@ class ReinforceCorrector(Corrector):
         ep_reward = []
         reward_log = 0
         episode = 0
-        for episode in tqdm.tqdm(range(self.num_episodes), desc = "Training Reinforce ep {}/{} : reward {}".format(episode, self.num_episodes, reward_log)):
-
+        for episode in tqdm.tqdm(range(self.num_episodes), total=self.num_episodes, desc = "Training Reinforce "):
             if episode == self.num_episodes - 1:
                 game_obs = []
                 u_sim_out = []
@@ -195,6 +194,7 @@ class ReinforceCorrector(Corrector):
                 # pertubate the movement if there is any perturbation
                 if self.perturbator is not None:
                     move_action = self.perturbator(np.array(move_action))
+                    
                 state = torch.tensor(move_action, dtype=torch.float32).to(self.device)
                 means = self.mean_network(state)
                 log_stds = self.std_network(state)
@@ -234,12 +234,12 @@ class ReinforceCorrector(Corrector):
 
                     
             # print("done ! episode : ",episode)
-
-            print("rewards summ at ep ", episode, " : ", )
-            ep_reward.append(np.sum(rewards))
+            reward_log = np.sum(rewards)
+            print("rewards summ at ep ", episode, " : ", reward_log)
+            ep_reward.append(reward_log)
 
             self.train_step(torch.stack(states).to(self.device), torch.stack(actions).to(self.device), rewards)
-            reward_log = np.sum(rewards)
+
         if self.log:
             print("loging training to : ", self.log_path)
             logs = {"obs" : np.array(game_obs).tolist(), "u_sim" : np.array(u_sim_out).tolist(), "model" : np.array(model_out).tolist()}

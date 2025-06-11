@@ -95,7 +95,8 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
 
         # step the env
         # print("action sended at step {i}, action = {action}".format(i = i, action = action))
-        observation, reward, done, info, _ = env.step(action)
+        observation, reward, done, info, _ = env.step(action*10)
+        print("received reward ", reward)
         # print("observations = ", observation)
         # update reward list
         reward_list.append(reward)

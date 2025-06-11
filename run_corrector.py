@@ -6,9 +6,9 @@ from classic_rl.corrector import *
 if __name__ == "__main__":
     
 
-        # create a perturbation
-    perturbator = NormalJittering(0, 20)
-    # perturbator = None
+    # create a perturbation
+    # perturbator = NormalJittering(0, 20)
+    perturbator = None
 
 
     # create a corrector
