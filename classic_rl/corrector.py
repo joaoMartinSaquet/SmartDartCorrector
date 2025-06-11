@@ -63,7 +63,6 @@ class LowPassCorrector(Corrector):
         else:
             return input    
         
-
         
 class ReinforceCorrector(Corrector):
     """
@@ -273,13 +272,6 @@ class CartesianGeneticCorrector(Corrector):
         
         return cum_reward[-1]
         
-        
-
-
-
-
-
-
 
 if __name__ == "__main__":
     

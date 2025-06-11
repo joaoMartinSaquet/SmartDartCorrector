@@ -9,10 +9,35 @@ from common.perturbation import *
 
 MAX_DISP = 40
 
+class Buffer:
+    """Inpired from stable_baselines3
+    """
+    
+    def __init__(self):
+        self.observations = []
+        self.rewards = []
+        self.dones = []
+
+    def store(self, observation, reward, done, info):
+        self.observations.append(observation)
+        self.rewards.append(reward)
+        self.dones.append(done)
+    
+
+    def reset(self):
+        self.observations = []
+        self.rewards = []
+        self.dones = []
+
+    def get(self):
+        return np.array(self.observations), np.array(self.rewards), np.array(self.dones)
+
+
+
 
 def stepSmartDartEnv(env, obs, u_simulator : UserSimulator, perturbator : Perturbator, corrector = None):
     """
-        Does'nt work we need to place our corrector inside... 
+        Does not work we need to place our corrector inside... 
     """
     obs = np.array(observation[0]["obs"])
     move_action, click_action = u_simulator.step(obs[:2], obs[2:])
@@ -102,9 +127,9 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
     reward_list = []
     # rolling out env
     for i in tqdm.tqdm(range(Nstep)):
+
+
         # get controller actions and process it (clamp, norm, pert, etc...)
-        
-        obs = np.array(observation[0]["obs"])
         move_actions = []
         click_actions = []
         for k, u_sim in zip(range(num_envs), u_simulators):
