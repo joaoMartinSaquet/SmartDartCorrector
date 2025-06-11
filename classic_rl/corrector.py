@@ -11,10 +11,10 @@ import json
 import tqdm
 
 
-from deep_stuff import networks
-from user_simulator import *
-from perturbation import *
-from rolloutenv import *
+from classic_rl.deep_stuff import networks
+from common.user_simulator import *
+from common.perturbation import *
+from common.rolloutenv import *
 
 # steps where we say, that's enough reset yourselves
 MAXSTEPS =int(1e6)

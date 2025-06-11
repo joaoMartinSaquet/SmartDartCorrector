@@ -3,9 +3,8 @@ from gymnasium import spaces
 import numpy as np
 import tqdm
 
-from user_simulator import *
-from perturbation import *
-from corrector import *
+from common.user_simulator import *
+from common.perturbation import *
 
 
 MAX_DISP = 40
