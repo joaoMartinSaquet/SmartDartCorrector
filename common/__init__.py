@@ -10,10 +10,13 @@ __author__ = "SmartDartCorrector Team"
 from .rolloutenv import *
 from .perturbation import *
 from .user_simulator import *
+from .corrector import *
+
 
 __all__ = [
     "rolloutenv",
     "perturbation", 
     "user_simulator",
+    "corrector",
 ]
 

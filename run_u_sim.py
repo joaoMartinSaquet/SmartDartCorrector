@@ -1,6 +1,6 @@
 from common.rolloutenv import *
 from common.perturbation import *
-from classic_rl.corrector import *
+from classic_rl.rl_corrector import *
 
 
 if __name__ == "__main__":

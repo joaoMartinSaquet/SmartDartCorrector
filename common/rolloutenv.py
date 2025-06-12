@@ -60,7 +60,7 @@ def stepSmartDartEnv(env, obs, u_simulator : UserSimulator, perturbator : Pertur
 
     return observation, reward, done, info
 
-def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, seed = 0):
+def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, seed = 0, log = 0):
 
     observation, info = env.reset(seed=seed)
     
@@ -78,11 +78,17 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
         obs = np.array(observation[0]["obs"])
         move_action, click_action = u_simulator.step(obs[:2], obs[2:])
 
+        # convert moveaction to numpy
+        move_action = np.array([move_action])
+        click_action = np.array(click_action)
+
         # add perturbation if there is any
         if perturbator is not None:
+            if log > 3: print("perturbator input = ", move_action)
             move_action = perturbator(move_action)
 
         if corrector is not None:
+            if log > 3: print("corrector input = ", move_action)
             move_action = corrector(move_action)
 
 
@@ -94,21 +100,22 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
         action = np.array([ action for _ in range(env.num_envs) ])
 
         # step the env
-        # print("action sended at step {i}, action = {action}".format(i = i, action = action))
-        observation, reward, done, info, _ = env.step(action*10)
-        print("received reward ", reward)
-        # print("observations = ", observation)
+        if log > 3:
+            print("action sended at step {i}, action = {action}".format(i = i, action = action))
+        observation, reward, done, _, _ = env.step(action)
+
         # update reward list
         reward_list.append(reward)
 
-
-        # print("done , reward = ", done, reward)
+        if log > 3:
+            print("done , reward = ", done, reward)
         # see how to do this with several env 
         if any(done):
-            # print("done")
+            if log > 0:
+                print("done")
             break
 
-    return np.cumsum(reward_list), reward_list
+    return np.sum(reward_list), reward_list
 
         
 

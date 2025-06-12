@@ -15,55 +15,12 @@ from classic_rl.policy import REINFORCEnet
 from common.user_simulator import *
 from common.perturbation import *
 from common.rolloutenv import *
+from common.corrector import *
 
 # steps where we say, that's enough reset yourselves
 MAXSTEPS =int(1e6)
 
-class Corrector():
-    def __init__(self, learn = False):
-        self.learning = learn
-        self.feedback_list = []
-        self.step = 0
 
-    def reset(self):
-
-        self.step = 0
-        self.feedback_list = []
-
-
-    def __call__(self, input):
-        return input
-    
-
-    def get_feedback(self, fb):
-        """function register the feedback that occurs inside the env (reward, done, etc...)
-
-        Args:
-            fb (_type_): _description_
-        """
-
-        self.feedback_list = []
-
-
-
-class LowPassCorrector(Corrector):
-    ''' averages overs 5 steps and then applies the correction'''
-    def __init__(self, nsteps = 5,learn = False):
-        super().__init__(learn)
-        self.feedback_list = []
-        self.step = 0
-        self.inputs = deque(maxlen = nsteps)
-        self.nsteps = nsteps
-
-    def __call__(self, input):
-        self.inputs.append(input)
-
-        if len(self.inputs) == self.nsteps:
-            return np.mean(self.inputs, axis=0)
-        else:
-            return input    
-        
-        
 class ReinforceCorrector(Corrector):
     """
     A reinforcement learning-based corrector that uses the REINFORCE algorithm to learn
@@ -248,29 +205,8 @@ class ReinforceCorrector(Corrector):
             torch.save(self.mean_network.state_dict(), os.path.join(self.log_path, "mean_network.pt"))
             torch.save(self.std_network.state_dict(), os.path.join(self.log_path, "std_network.pt"))
                     
-
-class CartesianGeneticCorrector(Corrector):
-
-    def __init__(self, env : GodotEnv, u_sim : UserSimulator, perturbator : Perturbator = None, learn = False, log = False):
-        super().__init__(env, u_sim, perturbator, learn, log)
-        self.log = log
-        self.log_path = "logs_corrector/CGP/" + time.strftime("%Y%m%d-%H%M%S") 
-        if not os.path.exists(self.log_path) and self.log:
-            print("creating log folder at : ", self.log_path)
-            os.makedirs(self.log_path)
-        
-        self.env = env 
-        self.u_sim = u_sim
-        self.perturbator = perturbator
-
-    def fitness_function(self, individual):
-        
-        # rollout the env with the individual
-        # return the reward
-        # return the reward
-        cum_reward, _ = rolloutSmartDartEnv(self.env, MAXSTEPS, self.perturbator, corrector = individual)
-        
-        return cum_reward[-1]
+    def learn(self):
+        self.training_loop()
         
 
 if __name__ == "__main__":

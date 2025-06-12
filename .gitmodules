@@ -1,3 +1,3 @@
-[submodule "Genetic_algorithms/pyCGP"]
-	path = Genetic_algorithms/pyCGP
+[submodule "GA/pyCGP"]
+	path = GA/pyCGP
 	url = git@github.com:joaoMartinSaquet/pyCGP.git

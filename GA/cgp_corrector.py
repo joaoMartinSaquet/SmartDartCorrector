@@ -1,8 +1,8 @@
 # cgp imports
-from pyCGP.pycgp import cgp, evaluators, viz, cgpfunctions
-from pyCGP.pycgp.cgp import *
-from pyCGP.pycgp.cgpfunctions import *
-from pyCGP.pycgp.cgpes import *
+from GA.pyCGP.pycgp import cgp, evaluators, viz, cgpfunctions
+from GA.pyCGP.pycgp.cgp import *
+from GA.pyCGP.pycgp.cgpfunctions import *
+from GA.pyCGP.pycgp.cgpes import *
 
 # corrector imports
 from common.user_simulator import *
@@ -13,7 +13,13 @@ from common.corrector import *
 # usual imports
 import numpy as np
 import sympy as sp
+import time
 
+LOG_PATH = "logs_corrector/CGP/" + time.strftime("%Y%m%d-%H%M%S") 
+
+if not os.path.exists(LOG_PATH):
+    print("creating log folder at : ", LOG_PATH)
+    os.makedirs(LOG_PATH)
 
 FUN_LIB =  [CGPFunc(f_sum, 'sum', 2, 0, '+'),
             CGPFunc(f_aminus, 'aminus', 2, 0, '-'),
@@ -26,8 +32,8 @@ FUN_LIB =  [CGPFunc(f_sum, 'sum', 2, 0, '+'),
             ]
 
 
-class CGP_corrector(evaluators.Evaluator, Corrector):
-    def __init__(self, nstep, col, row, perturbator = None):
+class CGPCorrector(evaluators.Evaluator, Corrector):
+    def __init__(self, env, nstep, col, row, perturbator = None):
         super().__init__()
 
         self.fun_lib = FUN_LIB
@@ -35,8 +41,8 @@ class CGP_corrector(evaluators.Evaluator, Corrector):
         self.input_shape = (1, 2) # dx and dy 
         self.output_shape = (1, 2)# dx and dy estimated
 
-        self.n_input = 2
-        self.n_output = 2
+        self.n_inputs = 2
+        self.n_outputs = 2
     
         self.col = col
         self.row = row
@@ -46,12 +52,13 @@ class CGP_corrector(evaluators.Evaluator, Corrector):
         self.perturbator = perturbator
         self.nstep = nstep
 
-        self.env = GodotEnv(convert_action_space=True)
+        self.env = env
 
     def evaluate(self, cgp, it):
-        
-        individual_corr = cgp.run()
-        rgathered, _= rolloutSmartDartEnv(env, self.nstep, self.perturbator, corrector = individual_corr)
+        print("evaluating : ", it)
+        individual_corr = cgp.run
+        rgathered, _= rolloutSmartDartEnv(self.env, self.nstep, self.perturbator, corrector = individual_corr, log = 10)
+        print(rgathered)
         return rgathered
 
     def evolve(self, mu, nb_ind = 4, num_csts = 0, 
@@ -59,7 +66,7 @@ class CGP_corrector(evaluators.Evaluator, Corrector):
                n_cpus=1, n_it=20, folder_name='test', term_criteria=20, random_genomes=True):
         
         
-        self.hof = [CGP_with_cste.random(self.n_inputs, self.n_outputs, num_csts, self.col, self.row, self.library, 
+        self.hof = [CGP_with_cste.random(self.n_inputs, self.n_outputs, num_csts, self.col, self.row, self.fun_lib, 
                                     self.col, False, const_min=-10, const_max=10, input_shape=self.input_shape, dtype='float')
                                         for i in range(mu)]
 
@@ -79,7 +86,7 @@ class CGP_corrector(evaluators.Evaluator, Corrector):
         return best, fit_history
     
     def clone(self):
-        return CGP_corrector(self.nstep, self.col, self.row, self.perturbator)
+        return CGPCorrector(self.nstep, self.col, self.row, self.perturbator)
     
     def best_logs(self, input_names, output_names):
         
@@ -93,7 +100,7 @@ class CGP_corrector(evaluators.Evaluator, Corrector):
             out_equation.append(sp.simplify)
 
         return out_equation
-
-if __name__ == "__main__":
-
-    print("testing pycgp")
+    
+    def learn(self):
+        
+        self.evolve(4, num_csts=1, folder_name=LOG_PATH)

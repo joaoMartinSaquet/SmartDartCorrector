@@ -5,11 +5,10 @@ for the SmartDartCorrector project.
 """
 
 # Import main classes and functions for easier access
-from .corrector import Corrector, LowPassCorrector
+from .rl_corrector import LowPassCorrector, ReinforceCorrector
 from .policy import REINFORCEnet
 
 __all__ = [
-    "Corrector",
     "LowPassCorrector", 
     "REINFORCEnet",
 ]
