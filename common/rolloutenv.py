@@ -1,4 +1,5 @@
 from godot_rl.core.godot_env import GodotEnv
+from godot_rl.wrappers.stable_baselines_wrapper import StableBaselinesGodotEnv 
 from gymnasium import spaces
 import numpy as np
 import tqdm
@@ -31,7 +32,13 @@ class Buffer:
 
     def get(self):
         return np.array(self.observations), np.array(self.rewards), np.array(self.dones)
+    
 
+def obs_handling(obs, sb_env):
+    if sb_env:
+        return obs["obs"]
+    else:
+        return obs
 
 
 
@@ -73,35 +80,38 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
     perturbator = pertubator
     reward_list = []
     # rolling out env
-    for i in tqdm.tqdm(range(Nstep)):
+    for i in range(Nstep):
         # get controller actions and process it (clamp, norm, pert, etc...)
         obs = np.array(observation[0]["obs"])
         move_action, click_action = u_simulator.step(obs[:2], obs[2:])
 
         # convert moveaction to numpy
-        move_action = np.array([move_action])
+        move_action = np.array(move_action)
         click_action = np.array(click_action)
 
         # add perturbation if there is any
         if perturbator is not None:
-            if log > 3: print("perturbator input = ", move_action)
+            if log > 2: print("RolloutSmartDartEnv perturbator input = ", move_action)
             move_action = perturbator(move_action)
-
+            if log > 2: print("RolloutSmartDartEnv  perturbator output = ", move_action)
         if corrector is not None:
-            if log > 3: print("corrector input = ", move_action)
+            if log > 3: 
+                print("RolloutSmartDartEnv corrector input = ", move_action)
+                print("RolloutSmartDartEnv corrector input shape = ", move_action.shape)
             move_action = corrector(move_action)
+            if log > 3: print("RolloutSmartDartEnv corrector output = ", move_action)
 
 
         # clamp action to don't have to big displacement
         move_action = np.clip(move_action, -MAX_DISP, MAX_DISP) 
-
+        
         # contruct msg to be send to the env
         action = np.insert(move_action, 0 , click_action)
         action = np.array([ action for _ in range(env.num_envs) ])
 
         # step the env
         if log > 3:
-            print("action sended at step {i}, action = {action}".format(i = i, action = action))
+            print("RolloutSmartDartEnv  action sended at step {i}, action = {action}".format(i = i, action = action))
         observation, reward, done, _, _ = env.step(action)
 
         # update reward list
@@ -123,13 +133,21 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
 
     num_envs = env.num_envs
 
-    observation, info = env.reset(seed=seed)
+    sb_env = isinstance(env, StableBaselinesGodotEnv)
+    if  sb_env:
+        observation = env.reset()
+    else : 
+        observation, _ = env.reset()
     
+    print("observation ", observation)
     # initialize controller
     # xinit = np.array(observation[0]["obs"][2:] + [0, 0]) 
     # get all xinit
-
-    u_simulators = [VITE_USim(observation[0]["obs"][2:] + [0, 0]) for _ in range(num_envs)]
+    if sb_env:
+        xinit = [np.array(observation["obs"][k][2:] + [0, 0]) for k in range(num_envs)]
+    else :
+        xinit = [np.array(observation[k]["obs"][2:]) for k in range(num_envs)]
+    u_simulators = [VITE_USim(xinit) for _ in range(num_envs)]
     
     perturbator = pertubator
     reward_list = []
@@ -141,7 +159,10 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
         move_actions = []
         click_actions = []
         for k, u_sim in zip(range(num_envs), u_simulators):
-            obs = np.array(observation[k]["obs"])
+            if sb_env:
+                obs = np.array(observation["obs"][k])
+            else :
+                obs = np.array(observation[k]["obs"])
             move_action, click_action = u_sim.step(obs[:2], obs[2:])
             move_actions.append(move_action)
             click_actions.append(click_action)
@@ -151,7 +172,7 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
         # add perturbation if there is any
         if perturbator is not None:
             for k in range(num_envs):
-                move_actions[k] = perturbator(move_actions[k])
+                move_actions[k] = perturbator(np.array(move_actions[k]))
 
 
         if corrector is not None:
@@ -165,7 +186,10 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
         action = np.hstack((np.array([click_actions]).T, move_actions))
         # step the env
         # print("action sended at step {i}, action = {action}".format(i = i, action = action))
-        observation, reward, done, info, _ = env.step(action)
+        if sb_env:
+            observation, reward, done, _ = env.step(action)
+        else :
+            observation, reward, done, info, _ = env.step(action)
         # print("observations = ", observation)
         # update reward list
         reward_list.append(reward)

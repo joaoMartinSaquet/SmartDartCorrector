@@ -16,6 +16,9 @@ logs_corrector/
 # JSON log files
 logs.json
 
+# CSVs 
+*.csv
+
 # Byte-compiled / optimized / DLL files
 *.pyc
 *.pyo
@@ -65,3 +68,5 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
+# games binaries
+games/

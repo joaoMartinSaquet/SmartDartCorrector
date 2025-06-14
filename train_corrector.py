@@ -36,8 +36,9 @@ if __name__ == "__main__":
         corr = ReinforceCorrector(env, u_sim, perturbator, learn=True, log=True)
         corr.learn()
     elif args.method == 'cgp':
+        ngen = 10   
         print("Starting Cartesian Genetic Programming training...")
-        corr = CGPCorrector(env, MAXSTEPS, 20, 1, perturbator = None)
+        corr = CGPCorrector(env, ngen, MAXSTEPS, 20, 1, perturbator)
         corr.learn()
     else:
         print(f"Unknown method: {args.method}")
