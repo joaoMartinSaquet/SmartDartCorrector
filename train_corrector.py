@@ -25,8 +25,8 @@ if __name__ == "__main__":
         print(f"Training with normal jittering (std={args.perturbation_std})")
 
     # Initialize the environment
-    env = GodotEnv(convert_action_space=True)
-
+    # env = GodotEnv(convert_action_space=True)
+    env = StableBaselinesGodotEnv(env_path="games/SmartDartSingleEnv/smartDartEnv.x86_64", show_window=False, n_parallel=6)
     # Initialize user simulator
     u_sim = VITE_USim([0, 0])
 
@@ -39,7 +39,7 @@ if __name__ == "__main__":
         ngen = 10   
         print("Starting Cartesian Genetic Programming training...")
         corr = CGPCorrector(env, ngen, MAXSTEPS, 20, 1, perturbator)
-        corr.learn()
+        fit_history = corr.learn(4, 16)
     else:
         print(f"Unknown method: {args.method}")
 

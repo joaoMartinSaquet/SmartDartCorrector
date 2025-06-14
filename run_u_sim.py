@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
     print("env created")
     print("env number is : ", env.num_envs)
-    # print("RolloutMultiSmartDartEnv Env = ", env.envs[0].num_envs)
+    print("RolloutMultiSmartDartEnv Env = ", env.envs[0])
     rewards = []
     for j in range(N):
         print("ep : ", j)

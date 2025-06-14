@@ -69,12 +69,11 @@ def stepSmartDartEnv(env, obs, u_simulator : UserSimulator, perturbator : Pertur
 
 def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, seed = 0, log = 0):
 
-    observation, info = env.reset(seed=seed)
-    
-    # initialize controller
-    # xinit = np.array(observation[0]["obs"][2:] + [0, 0]) 
-    xinit = np.array(observation[0]["obs"][2:]) 
+    num_envs = env.num_envs
 
+    observation, info = env.reset()
+    xinit = np.array(observation[0]["obs"][2:])
+    
     u_simulator = VITE_USim(xinit)
     
     perturbator = pertubator
@@ -107,12 +106,13 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
         
         # contruct msg to be send to the env
         action = np.insert(move_action, 0 , click_action)
-        action = np.array([ action for _ in range(env.num_envs) ])
+        action = np.array([ action for _ in range(num_envs) ])
 
         # step the env
         if log > 3:
             print("RolloutSmartDartEnv  action sended at step {i}, action = {action}".format(i = i, action = action))
-        observation, reward, done, _, _ = env.step(action)
+        
+        observation, reward, done, info, _ = env.step(action)
 
         # update reward list
         reward_list.append(reward)
@@ -124,7 +124,8 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
             if log > 0:
                 print("done")
             break
-
+    if log > 0:
+        print("RolloutSmartDartEnv reward list = ", np.sum(reward_list),)
     return np.sum(reward_list), reward_list
 
         
