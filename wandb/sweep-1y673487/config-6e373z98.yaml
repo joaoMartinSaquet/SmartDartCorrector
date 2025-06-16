@@ -1,6 +1,0 @@
-wandb_version: 1
-
-fc_layer_size:
-  value: 32
-learning_rate:
-  value: 0.00018025334387931636
