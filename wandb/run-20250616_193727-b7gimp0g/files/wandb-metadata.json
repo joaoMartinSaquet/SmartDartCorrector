@@ -1,0 +1,49 @@
+{
+  "os": "Linux-6.8.0-60-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.11.5",
+  "startedAt": "2025-06-16T17:37:27.360229Z",
+  "args": [
+    "--method",
+    "rl",
+    "--no_perturbation",
+    "--wandb"
+  ],
+  "program": "/home/jmartinsaquet/Documents/SmartDartCorrector/train_corrector.py",
+  "codePath": "train_corrector.py",
+  "git": {
+    "remote": "git@github.com:joaoMartinSaquet/SmartDartCorrector.git",
+    "commit": "1ce72d4b3bd8ddcab698f77c7d838a780ad5c906"
+  },
+  "email": "joao.martinsaquetpro@gmail.com",
+  "root": "/home/jmartinsaquet/Documents/SmartDartCorrector",
+  "host": "dragonfly",
+  "executable": "/home/jmartinsaquet/.pyenv/versions/env_aiming/bin/python",
+  "codePathLocal": "train_corrector.py",
+  "cpu_count": 14,
+  "cpu_count_logical": 20,
+  "gpu": "NVIDIA RTX 2000 Ada Generation Laptop GPU",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "502921060352",
+      "used": "223335051264"
+    }
+  },
+  "memory": {
+    "total": "33291280384"
+  },
+  "cpu": {
+    "count": 14,
+    "countLogical": 20
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA RTX 2000 Ada Generation Laptop GPU",
+      "memoryTotal": "8585740288",
+      "cudaCores": 3072,
+      "architecture": "Ada",
+      "uuid": "GPU-c4b68c60-5137-b5ee-d297-2d7b8721b193"
+    }
+  ],
+  "cudaVersion": "12.2"
+}
