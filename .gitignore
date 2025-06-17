@@ -70,3 +70,5 @@ Thumbs.db
 
 # games binaries
 games/
+
+*.yaml

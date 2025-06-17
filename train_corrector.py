@@ -26,8 +26,18 @@ def train_rl_corrector_wandb(config = None, args=None):
     with wandb.init(config=config):
         config = wandb.config
         corr = ReinforceCorrector(env, u_sim, perturbator, hidden_size=config.fc_layer_size, learning_rate=config.learning_rate, learn=True, log=True, policy_type="StackedMLP")
-        reward = corr.learn(False)
+        reward_list, reward = corr.learn(False)
         wandb.log({"reward": reward})
+
+                
+        data = [[x, y] for (x, y) in zip(np.arange(len(reward_list)), reward_list)]
+        table = wandb.Table(data=data, columns=["episodes", "rewards"])
+        wandb.log(
+            {
+                "reward over episodes": wandb.plot.line(
+                    table, "x", "y", title="rewards"
+                )
+            })
     print("Training completed using Reinforcement Learning method!")
     env.close()
 
@@ -65,7 +75,7 @@ if __name__ == "__main__":
                     'max': 1e-2
                 },
                 'fc_layer_size': { 
-                        'values': [32, 64, 128]
+                        'values': [64, 128, 256]
                                 },
             }
 

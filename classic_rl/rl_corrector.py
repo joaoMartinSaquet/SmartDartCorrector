@@ -91,7 +91,7 @@ class ReinforceCorrector(Corrector):
         # REINFORCE algorithm hyperparameters
         self.gamma = 0.99  # Discount factor for computing returns
         self.learning_rate = learning_rate # Learning rate for neural network optimization
-        self.num_episodes = 100  # Number of training episodes
+        self.num_episodes = 50  # Number of training episodes
         self.batch_size = 64  # Batch size (currently not used in implementation)
 
         # Training configuration
@@ -183,7 +183,7 @@ class ReinforceCorrector(Corrector):
 
     def training_loop(self, log = True):
 
-        ep_reward = []
+        ep_rewards = []
         reward_log = 0
         episode = 0
         for episode in tqdm.tqdm(range(self.num_episodes), total=self.num_episodes, desc = "Training Reinforce "):
@@ -278,7 +278,7 @@ class ReinforceCorrector(Corrector):
             # print("done ! episode : ",episode)
             reward_log = np.sum(rewards)
             print("rewards summ at ep ", episode, " : ", reward_log)
-            ep_reward.append(reward_log)
+            ep_rewards.append(reward_log)
 
             self.train_step(torch.stack(states).to(self.device), torch.stack(actions).to(self.device), rewards)
 
@@ -286,13 +286,13 @@ class ReinforceCorrector(Corrector):
             print("loging training to : ", self.log_path)
             logs = {"obs" : np.array(game_obs).tolist(), "u_sim" : np.array(u_sim_out).tolist(), "model" : np.array(model_out).tolist()}
             json.dump(logs, open(os.path.join(self.log_path, "logs.json"), "w"))    
-            np.save(os.path.join(self.log_path, "ep_reward.npy"), np.array(ep_reward))
+            np.save(os.path.join(self.log_path, "ep_reward.npy"), np.array(ep_rewards))
             torch.save(self.std_network.state_dict(), os.path.join(self.log_path, "std_network.pt"))
             torch.save(self.mean_network.state_dict(), os.path.join(self.log_path, "mean_network.pt"))
             torch.onnx.export(self.mean_network, state, os.path.join(self.log_path, "mean_network.onnx"))
             torch.onnx.export(self.std_network, state, os.path.join(self.log_path, "std_network.onnx"))
 
-        return ep_reward
+        return ep_rewards, reward_log
 
                     
     def learn(self, log = False):
@@ -305,8 +305,8 @@ class ReinforceCorrector(Corrector):
         print("policy type : ", self.policy_type)
         print("device : ", self.device)
 
-        reward = self.training_loop(log=log)
-        return reward
+        reward_list, reward = self.training_loop(log=log)
+        return reward_list, reward
     def __call__(self, input):
         state = torch.tensor(input, dtype=torch.float32).to(self.device)
         means = self.mean_network(state)
