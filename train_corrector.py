@@ -8,6 +8,8 @@ import wandb
 import pprint
 from functools import partial
 
+import pandas as pd
+
 wandb.login()
 
 
@@ -72,10 +74,10 @@ if __name__ == "__main__":
                 'learning_rate': {
                     'distribution': 'uniform',
                     'min': 1e-5,
-                    'max': 1e-2
+                    'max': 2e-3
                 },
                 'fc_layer_size': { 
-                        'values': [64, 128, 256]
+                        'values': [128, 256, 512]
                                 },
             }
 
@@ -90,6 +92,8 @@ if __name__ == "__main__":
             wandb.agent(sweep_id, train, count=20)
             
     else:
+        
+
         # Create perturbation
         if args.no_perturbation:
             perturbator = None
@@ -100,24 +104,38 @@ if __name__ == "__main__":
 
         # Initialize the environment
         # env = GodotEnv(convert_action_space=True)
-        env = StableBaselinesGodotEnv(env_path="games/SmartDartSingleEnv/smartDartEnv.x86_64", show_window=True, n_parallel=1)
+        env = StableBaselinesGodotEnv(env_path="games/SmartDartSingleEnv/smartDartEnv.x86_64", show_window=False, n_parallel=1)
         # Initialize user simulator
         u_sim = VITE_USim([0, 0])
+        Nruns = 10
+        reward_runs = []
+        reward_lists = []
+        for i in range(Nruns):
+            # Train based on selected method
+            if args.method == 'rl':
+                print("Starting Reinforcement Learning training...")
+                corr = ReinforceCorrector(env, u_sim, perturbator, hidden_size=256, learning_rate=1e-3, learn=True, log=True, policy_type="StackedMLP")
+                reward_list, final_reward = corr.learn(False)
+                reward_runs.append(final_reward)
+                reward_lists.append(reward_list)
 
-        # Train based on selected method
-        if args.method == 'rl':
-            print("Starting Reinforcement Learning training...")
-            corr = ReinforceCorrector(env, u_sim, perturbator, learning_rate=1e-4, learn=True, log=True, policy_type="StackedMLP")
-            corr.learn()
-        elif args.method == 'cgp':
-            ngen = 10   
-            print("Starting Cartesian Genetic Programming training...")
-            corr = CGPCorrector(env, ngen, MAXSTEPS, 20, 1, perturbator)
-            fit_history = corr.learn(4, 16)
-        else:
-            print(f"Unknown method: {args.method}")
+                file_name = "10_rl_corrector_None_stacked_mlp.csv"
 
-        print(f"Training completed using {args.method.upper()} method!")
+                log_dict = {
+                    "reward": reward_runs,
+                    "reward_list": reward_lists}
+                reward_df = pd.DataFrame(log_dict)
+                reward_df.to_csv(file_name)
 
-        # Close environment
+            elif args.method == 'cgp':
+                ngen = 10   
+                print("Starting Cartesian Genetic Programming training...")
+                corr = CGPCorrector(env, ngen, MAXSTEPS, 20, 1, perturbator)
+                fit_history = corr.learn(4, 16)
+            else:
+                print(f"Unknown method: {args.method}")
+
+            print(f"Training completed using {args.method.upper()} method!")
+
+            # Close environment
         env.close()

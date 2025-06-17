@@ -84,9 +84,6 @@ class ReinforceCorrector(Corrector):
         # Logging configuration
         self.log = log
         self.log_path = "logs_corrector/Reinforce/" + time.strftime("%Y%m%d-%H%M%S") 
-        if not os.path.exists(self.log_path) and self.log:
-            print("creating log folder at : ", self.log_path)
-            os.makedirs(self.log_path)
 
         # REINFORCE algorithm hyperparameters
         self.gamma = 0.99  # Discount factor for computing returns
@@ -284,6 +281,9 @@ class ReinforceCorrector(Corrector):
 
         if log:
             print("loging training to : ", self.log_path)
+            if not os.path.exists(self.log_path) and self.log:
+                print("creating log folder at : ", self.log_path)
+                os.makedirs(self.log_path)
             logs = {"obs" : np.array(game_obs).tolist(), "u_sim" : np.array(u_sim_out).tolist(), "model" : np.array(model_out).tolist()}
             json.dump(logs, open(os.path.join(self.log_path, "logs.json"), "w"))    
             np.save(os.path.join(self.log_path, "ep_reward.npy"), np.array(ep_rewards))
