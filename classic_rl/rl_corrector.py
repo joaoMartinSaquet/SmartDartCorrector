@@ -11,7 +11,7 @@ import json
 import tqdm
 
 
-from classic_rl.policy import REINFORCEnet, REINFORCELSTM
+from classic_rl.policy import REINFORCEnet, REINFORCELSTM, DDPGActor, DDPGCritic
 from common.user_simulator import *
 from common.perturbation import *
 from common.rolloutenv import *
@@ -38,11 +38,14 @@ class inputBuffer(deque):
     def get(self):
         return torch.stack(list(self))
 
+
 def normalize(x):
     return (x - (-MAX_DISP))/(MAX_DISP - (-MAX_DISP))
 
 def unnormalize(x):
     return (x * (MAX_DISP - (-MAX_DISP))) + (-MAX_DISP)
+
+
 class ReinforceCorrector(Corrector):
     """
     A reinforcement learning-based corrector that uses the REINFORCE algorithm to learn
@@ -88,7 +91,7 @@ class ReinforceCorrector(Corrector):
         # REINFORCE algorithm hyperparameters
         self.gamma = 0.99  # Discount factor for computing returns
         self.learning_rate = learning_rate # Learning rate for neural network optimization
-        self.num_episodes = 50  # Number of training episodes
+        self.num_episodes = 100  # Number of training episodes
         self.batch_size = 64  # Batch size (currently not used in implementation)
 
         # Training configuration
@@ -314,6 +317,91 @@ class ReinforceCorrector(Corrector):
         stds = torch.exp(log_stds)
         dist = torch.distributions.Normal(means, stds)
         return dist.sample()
+
+
+class DDPGCorrector(Corrector):
+    def __init__(self, env : GodotEnv, u_sim : UserSimulator, perturbator : Perturbator = None, learn = False, log = False,
+                 policy_type = "StackedMLP", hidden_size = 64, actor_lr=1e-4, critic_lr=1e-3, gamma=0.99, tau=0.001, buffer_size=10000, batch_size=64):
+        """
+
+        Initialize the ReinforceCorrector with environment, user simulator, and training parameters.
+        
+        Args:
+            env (GodotEnv): The Godot environment for running simulations
+            u_sim (UserSimulator): User simulator for generating user movement actions
+            perturbator (Perturbator, optional): Module to add perturbations to user actions. Defaults to None.
+            learn (bool, optional): Whether the corrector is in learning mode. Defaults to False.
+            log (bool, optional): Whether to enable logging of training data. Defaults to False.
+            policy_type = ["StackedMLP", "MLP", "LSTM"]
+        """
+        super().__init__(learn)
+        # Logging configuration
+        self.log = log
+        self.log_path = "logs_corrector/DDPG/" + time.strftime("%Y%m%d-%H%M%S") 
+
+        # DDPG algorithm hyperparameters
+        self.gamma = gamma  #s Discount factor for computing returns
+        self.tau = tau  # Target network update rate
+        self.act_lr = actor_lr  # Actor learning rate
+        self.crit_lr = critic_lr  # Critic learning rate
+
+        self.batch_size = batch_size  # Batch size (currently not used in implementation)
+        self.buffer_size = buffer_size  # Size of the replay buffer
+        # Training configuration
+        self.seed = 0
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Neural networks for policy representation
+        # Mean network: outputs the mean of the action distribution
+        input_dim = 2
+        self.action_dim = 2
+        if policy_type == "MLP":
+            input_dim = 2
+        elif policy_type == "StackedMLP":
+            self.sequence_length = 10
+            input_dim = 2 * self.sequence_length
+            self.input_buffer = inputBuffer(input_dim=input_dim, maxlen=self.sequence_length)
+        else :
+            print("unknow policy net type")
+            raise NotImplementedError
+        
+        self.policy_type = policy_type
+        if policy_type != "LSTM":
+            print("unknow policy net type")
+            raise NotImplementedError
+        else:
+            self.actor = DDPGActor(input_dim, self.action_dim, hidden_size, hidden_size).to(self.device)
+            self.actor_target = DDPGActor(input_dim, self.action_dim, hidden_size).to(self.device)
+
+            self.critic = DDPGCritic(input_dim, self.action_dim, hidden_size, hidden_size).to(self.device)
+            self.critic_target = DDPGCritic(input_dim, self.action_dim, hidden_size, hidden_size).to(self.device)
+
+        
+        self.actor_optim = optim.Adam(self.actor.parameters(), lr=self.actor_lr)
+        self.critic_optim = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
+        
+        self.env = env  # Godot environment for smart darts simulation
+        self.sb = isinstance(self.env, StableBaselinesGodotEnv)
+        self.u_sim = u_sim  # User simulator for generating human-like movements
+        self.perturbator = perturbator  # Optional noise/perturbation module
+
+
+        self.replay_buffer = deque(maxlen=self.buffer_size)
+
+    def get_action(self, state, noise=0.1):
+
+        state = torch.FloatTensor(state).unsqueeze(0)
+        action = self.actor(state)
+        action = action + noise * torch.float(np.random.randn(self.action_dim))
+        # in base impl it is clamped
+        return action
+
+    def soft_update(target, source, tau):
+        for target_param, param in zip(target.parameters(), source.parameters()):
+            target_param.data.copy_(
+                target_param.data * (1.0 - tau) + param.data * tau
+            )
+
+
 
 if __name__ == "__main__":
     

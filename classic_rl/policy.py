@@ -17,6 +17,7 @@ class REINFORCEnet(nn.Module):
                 layers_list.append(nn.Linear(layers[i-1], layers[i]))
                 layers_list.append(self.fa)
         layers_list.append(nn.Linear(layers[-1], n_output))
+        # layers_list.append(self.fa)
         self.layers_relu_stack = nn.Sequential(*layers_list)
 
 
@@ -42,3 +43,43 @@ class REINFORCELSTM(nn.Module):
         out, (hn, cn) = self.lstm(x, (h0, c0))
         out = self.fc(out[:, -1, :])
         return out, hn, cn
+    
+
+
+class DDPGActor(nn.Module):
+    def __init__(self, state_dim, action_dim, hidden_dim):
+        super(DDPGActor, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, action_dim)
+        self.fa =  nn.Tanh()
+
+    def forward(self, x):
+        x = self.fa(self.fc1(x))
+        x = self.fa(self.fc2(x))
+        self.fc3(x)
+        return x
+
+def copy_weights(target, source): #(m):
+    for target_param, param in zip(target.parameters(), source.parameters()):
+        target_param.data.copy_(param.data)
+
+def soft_update(target, source, tau):
+    for target_param, param in zip(target.parameters(), source.parameters()):
+        target_param.data.copy_(
+            target_param.data * (1.0 - tau) + param.data * tau
+        )
+
+class DDPGCritic(nn.Module):
+    def __init__(self, state_dim, action_dim, hidden_dim1, hidden_dim2):
+        super(DDPGActor, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim1)
+        self.fc2 = nn.Linear(hidden_dim1 + action_dim, hidden_dim2)
+        self.fc3 = nn.Linear(hidden_dim2, action_dim)
+        self.fa =  nn.ReLU()
+
+    def forward(self, state, action):
+        x = self.fa(self.fc1(state))
+        x = self.fa(self.fc2(torch.cat([x, action], dim=1)))
+        x = self.fc3(x)
+        return x
