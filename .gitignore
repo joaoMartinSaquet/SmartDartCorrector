@@ -72,3 +72,6 @@ Thumbs.db
 games/
 
 *.yaml
+
+# wandb logs
+wandb/
