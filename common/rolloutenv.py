@@ -3,6 +3,8 @@ from godot_rl.wrappers.stable_baselines_wrapper import StableBaselinesGodotEnv
 from gymnasium import spaces
 import numpy as np
 import tqdm
+from loguru import logger
+
 
 from common.user_simulator import *
 from common.perturbation import *
@@ -90,15 +92,15 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
 
         # add perturbation if there is any
         if perturbator is not None:
-            if log > 2: print("RolloutSmartDartEnv perturbator input = ", move_action)
+            if log > 2: logger.debug("RolloutSmartDartEnv perturbator input = ", move_action)
             move_action = perturbator(move_action)
-            if log > 2: print("RolloutSmartDartEnv  perturbator output = ", move_action)
+            if log > 2: logger.debug("RolloutSmartDartEnv  perturbator output = ", move_action)
         if corrector is not None:
             if log > 3: 
-                print("RolloutSmartDartEnv corrector input = ", move_action)
-                print("RolloutSmartDartEnv corrector input shape = ", move_action.shape)
+                logger.debug("RolloutSmartDartEnv corrector input = ", move_action)
+                logger.debug("RolloutSmartDartEnv corrector input shape = ", move_action.shape)
             move_action = corrector(move_action)
-            if log > 3: print("RolloutSmartDartEnv corrector output = ", move_action)
+            if log > 3: logger.debug("RolloutSmartDartEnv corrector output = ", move_action)
 
 
         # clamp action to don't have to big displacement
@@ -110,7 +112,7 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
 
         # step the env
         if log > 3:
-            print("RolloutSmartDartEnv  action sended at step {i}, action = {action}".format(i = i, action = action))
+            logger.debug("RolloutSmartDartEnv  action sended at step {i}, action = {action}".format(i = i, action = action))
         
         observation, reward, done, info, _ = env.step(action)
 
@@ -118,14 +120,14 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
         reward_list.append(reward)
 
         if log > 3:
-            print("done , reward = ", done, reward)
+            logger.debug("done , reward = ", done, reward)
         # see how to do this with several env 
         if any(done):
             if log > 0:
-                print("done")
+                logger.debug("done")
             break
     if log > 0:
-        print("RolloutSmartDartEnv reward list = ", np.sum(reward_list),)
+        logger.debug("RolloutSmartDartEnv reward list = ", np.sum(reward_list),)
     return np.sum(reward_list), reward_list
 
         
@@ -140,7 +142,7 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
     else : 
         observation, _ = env.reset()
     
-    print("observation ", observation)
+    logger.debug("observation ", observation)
     # initialize controller
     # xinit = np.array(observation[0]["obs"][2:] + [0, 0]) 
     # get all xinit
@@ -219,18 +221,18 @@ if __name__ == "__main__":
     # Initialize the environment
     env = GodotEnv(convert_action_space=True)
 
-    print("env created")
-    print("env number is : ", env.num_envs)
+    logger.debug("env created")
+    logger.debug("env number is : ", env.num_envs)
 
     for j in range(N):
-        print("ep : ", j)
+        logger.debug("ep : ", j)
         # Run the environment
         if env.num_envs > 1:
             r_summ, r_list = rolloutMultiSmartDartEnv(env, 10000, perturbator, corrector)
-            print("reward summ = ", r_summ[-1])
+            logger.debug("reward summ = ", r_summ[-1])
         else:
             r_summ, r_list = rolloutSmartDartEnv(env, 10000, perturbator, corrector)    
-        print("reward summ = ", r_summ[-1])
+        logger.debug("reward summ = ", r_summ[-1])
     
     # closing environment
     env.close()

@@ -16,11 +16,13 @@ import sympy as sp
 import time
 import matplotlib.pyplot as plt
 from collections import deque
+from loguru import logger
+import pandas as pd
 
 LOG_PATH = "logs_corrector/CGP/" + time.strftime("%Y%m%d-%H%M%S") 
 
 if not os.path.exists(LOG_PATH):
-    print("creating log folder at : ", LOG_PATH)
+    logger.info("creating log folder at : ", LOG_PATH)
     os.makedirs(LOG_PATH)
 
 FUN_LIB =  [CGPFunc(f_sum, 'sum', 2, 0, '+'),
@@ -107,17 +109,17 @@ class CGPCorrector(Corrector):
         
         out, infix_out = self.best.to_function_string(input_names, output_names)
     
-        print("best raw equations : ",out)
+        logger.debug("best raw equations : ",out)
         out_equation = []
         for o in infix_out:
-            print("HOF best simplified : ", sp.simplify(o))
+            # logger.debug("HOF best simplified : ", sp.simplify(o))
             out_equation.append(sp.simplify)
 
         return out_equation
     
     def learn(self, mu = 4, nb_ind = 4, num_csts = 1, 
                mutation_rate_nodes = 0.2, mutation_rate_outputs=0.2, mutation_rate_const_params=0.01,
-               n_cpus=6, n_it=5, folder_name='test', term_criteria=-np.inf, random_genomes=False):
+               n_cpus=6, n_it=500, folder_name=LOG_PATH, term_criteria=-np.inf, random_genomes=False):
         
         # self.evaluator.evolve(1, num_csts=1, n_it=self.ngen, folder_name=LOG_PATH, random_genomes=False, n_cpus=self.env.num_envs)
         self.hof = [CGP_with_cste.random(self.n_inputs, self.n_outputs, num_csts, self.col, self.row, self.fun_lib, 
@@ -126,20 +128,25 @@ class CGPCorrector(Corrector):
        
         # not used yet                
         if not random_genomes:
-            print("getting prior knowledge of the problem")
+            logger.debug("getting prior knowledge of the problem")
             # get the prior knowledge of the problem (fitts dx = y0 and dy = y1)
             for ind in self.hof:
                 ind.genome[-2] = 0 # y0 = dx
                 ind.genome[-1] = 1 # y1 = dy
 
 
-        print("evolving m + l" )
-        es = CGPES_ml(mu, nb_ind, mutation_rate_nodes, mutation_rate_outputs, mutation_rate_const_params, self.hof, self.evaluator, folder_name, n_cpus)
+        logger.info("evolving m + l" )
+        logger.info("hyperparameters : mu {mu}, lamba : {nb_ind}, ngen {ngen}, nstep {nstep}, col {col}, row {row}"
+                    .format(mu=mu, nb_ind=nb_ind, ngen=self.ngen, nstep=self.nstep, col=self.col, row=self.row))
+        es = CGPES_ml(mu, nb_ind, mutation_rate_nodes, mutation_rate_outputs, mutation_rate_const_params, 
+                      self.hof, self.evaluator, folder_name, n_cpus)
                 
-        es.run(n_it, term_criteria=term_criteria)
+        es.run(self.ngen, term_criteria=term_criteria)
         
         fit_history = es.fitness_history
-        self.best = es.hof[np.argmax(es.hof_fit)]
+        best_idx = np.argmax(es.hof_fit)
+        self.best = es.hof[best_idx]
+        self.best_genomes = es.best_genomes
         
         input_names = ['dx', 'dy']
         output_names = ['dx_est', 'dy_est']
@@ -148,10 +155,19 @@ class CGPCorrector(Corrector):
         except :
             out = "no equation found"
         
-        print("best equations : ", out)
+        logger.info("best equations : ", out)
         
         G = self.best.netx_graph(input_names, output_names)
         viz.draw_net(G, self.n_inputs, self.n_outputs)
         plt.savefig(LOG_PATH + "/graph.png")
+
+        print("fit history : ", fit_history)
+        print("best genome : ", self.best_genomes)
+        
+        to_dump = {"fit_history" : fit_history,
+                   "best_genome" : self.best_genomes}
+        
+        pd.DataFrame(to_dump).to_csv(LOG_PATH + "/log.csv")
+        
         return fit_history
 

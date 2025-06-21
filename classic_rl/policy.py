@@ -47,20 +47,21 @@ class REINFORCELSTM(nn.Module):
 
 
 class DDPGActor(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim):
+    def __init__(self, state_dim, action_dim, hidden_dim1, hidden_dim2):
         super(DDPGActor, self).__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, action_dim)
+        self.fc1 = nn.Linear(state_dim, hidden_dim1)
+        self.fc2 = nn.Linear(hidden_dim1, hidden_dim2)
+        self.fc3 = nn.Linear(hidden_dim2, action_dim)
         self.fa =  nn.Tanh()
 
     def forward(self, x):
+        
         x = self.fa(self.fc1(x))
         x = self.fa(self.fc2(x))
-        self.fc3(x)
+        x = self.fc3(x)
         return x
 
-def copy_weights(target, source): #(m):
+def hard_update(target, source): #(m):
     for target_param, param in zip(target.parameters(), source.parameters()):
         target_param.data.copy_(param.data)
 
@@ -72,10 +73,10 @@ def soft_update(target, source, tau):
 
 class DDPGCritic(nn.Module):
     def __init__(self, state_dim, action_dim, hidden_dim1, hidden_dim2):
-        super(DDPGActor, self).__init__()
+        super(DDPGCritic, self).__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim1)
         self.fc2 = nn.Linear(hidden_dim1 + action_dim, hidden_dim2)
-        self.fc3 = nn.Linear(hidden_dim2, action_dim)
+        self.fc3 = nn.Linear(hidden_dim2, 1)
         self.fa =  nn.ReLU()
 
     def forward(self, state, action):

@@ -9,9 +9,8 @@ import pprint
 from functools import partial
 
 import pandas as pd
-
-wandb.login()
-
+from loguru import logger
+# wandb.login()
 
 def train_rl_corrector_wandb(config = None, args=None):
     print("Starting Reinforcement Learning training...")
@@ -104,7 +103,16 @@ if __name__ == "__main__":
 
         # Initialize the environment
         # env = GodotEnv(convert_action_space=True)
-        env = StableBaselinesGodotEnv(env_path="games/SmartDartSingleEnv/smartDartEnv.x86_64", show_window=False, n_parallel=1)
+        if args.method == 'rl':
+            n_parallel = 1
+        elif args.method == 'cgp':
+            n_parallel = 6
+        else :
+            raise ValueError(f"Unknown method: {args.method}")
+        
+        # env = StableBaselinesGodotEnv(env_path="games/SmartDartSingleEnv/smartDartEnv.x86_64", show_window=False, n_parallel=n_parallel)
+        env = StableBaselinesGodotEnv(env_path="games/SmartDartSingleEnv/smartDartEnv.x86_64", show_window=False, n_parallel=n_parallel)
+
         # Initialize user simulator
         u_sim = VITE_USim([0, 0])
         Nruns = 10
@@ -113,13 +121,16 @@ if __name__ == "__main__":
         for i in range(Nruns):
             # Train based on selected method
             if args.method == 'rl':
-                print("Starting Reinforcement Learning training...")
-                corr = ReinforceCorrector(env, u_sim, perturbator, hidden_size=256, learning_rate=1e-3, learn=True, log=True, policy_type="StackedMLP")
-                reward_list, final_reward = corr.learn(False)
+                n_episodes=100
+                logger.info(f"Reinforcement Learning training : {i+1} / {Nruns}")
+                # corr = ReinforceCorrector(env, u_sim, perturbator, hidden_size=256, learning_rate=1e-4, learn=True, log=True, policy_type="StackedMLP")
+                corr = DDPGCorrector(env, u_sim, perturbator, hidden_size=256, log=True, policy_type="StackedMLP")
+                reward_list, final_reward = corr.learn(n_episodes)
                 reward_runs.append(final_reward)
                 reward_lists.append(reward_list)
 
-                file_name = "10_rl_corrector_None_stacked_mlp.csv"
+                logger.info(f"final reward of iteration {i+1} : {final_reward}", )
+                file_name = "10_rl_corrector_None_stacked_mlp_DDPG.csv"
 
                 log_dict = {
                     "reward": reward_runs,
@@ -128,10 +139,10 @@ if __name__ == "__main__":
                 reward_df.to_csv(file_name)
 
             elif args.method == 'cgp':
-                ngen = 10   
+                ngen = 50
                 print("Starting Cartesian Genetic Programming training...")
                 corr = CGPCorrector(env, ngen, MAXSTEPS, 20, 1, perturbator)
-                fit_history = corr.learn(4, 16)
+                fit_history = corr.learn(8, 96, random_genomes=True)
             else:
                 print(f"Unknown method: {args.method}")
 

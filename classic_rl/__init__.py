@@ -7,9 +7,9 @@ for the SmartDartCorrector project.
 # Import main classes and functions for easier access
 from .rl_corrector import LowPassCorrector, ReinforceCorrector
 from .policy import REINFORCEnet
+from .buffer import DDPGReplayBuffer
 
 __all__ = [
-    "LowPassCorrector", 
-    "REINFORCEnet",
+
 ]
 

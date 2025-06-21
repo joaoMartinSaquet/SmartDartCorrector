@@ -9,9 +9,11 @@ import os
 import time
 import json
 import tqdm
+from copy import deepcopy
 
-
-from classic_rl.policy import REINFORCEnet, REINFORCELSTM, DDPGActor, DDPGCritic
+from classic_rl.policy import REINFORCEnet, REINFORCELSTM,DDPGActor, DDPGCritic
+from classic_rl.policy import hard_update, soft_update
+from classic_rl.buffer import DDPGReplayBuffer
 from common.user_simulator import *
 from common.perturbation import *
 from common.rolloutenv import *
@@ -91,13 +93,13 @@ class ReinforceCorrector(Corrector):
         # REINFORCE algorithm hyperparameters
         self.gamma = 0.99  # Discount factor for computing returns
         self.learning_rate = learning_rate # Learning rate for neural network optimization
-        self.num_episodes = 100  # Number of training episodes
+        self.num_episodes = 50   # Number of training episodes
         self.batch_size = 64  # Batch size (currently not used in implementation)
 
         # Training configuration
         self.seed = 0
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.layers = [hidden_size, hidden_size]
+        self.layers = [hidden_size, hidden_size, hidden_size]
         # Neural networks for policy representation
         # Mean network: outputs the mean of the action distribution
         input_dim = 2
@@ -283,9 +285,9 @@ class ReinforceCorrector(Corrector):
             self.train_step(torch.stack(states).to(self.device), torch.stack(actions).to(self.device), rewards)
 
         if log:
-            print("loging training to : ", self.log_path)
+            logger.info("loging training to : {self.log_path}")
             if not os.path.exists(self.log_path) and self.log:
-                print("creating log folder at : ", self.log_path)
+                logger.info("creating log folder at : {self.log_path}")
                 os.makedirs(self.log_path)
             logs = {"obs" : np.array(game_obs).tolist(), "u_sim" : np.array(u_sim_out).tolist(), "model" : np.array(model_out).tolist()}
             json.dump(logs, open(os.path.join(self.log_path, "logs.json"), "w"))    
@@ -309,7 +311,12 @@ class ReinforceCorrector(Corrector):
         print("device : ", self.device)
 
         reward_list, reward = self.training_loop(log=log)
+
+
+        # print("end of learning ", reward_list)
         return reward_list, reward
+    
+
     def __call__(self, input):
         state = torch.tensor(input, dtype=torch.float32).to(self.device)
         means = self.mean_network(state)
@@ -321,11 +328,12 @@ class ReinforceCorrector(Corrector):
 
 class DDPGCorrector(Corrector):
     def __init__(self, env : GodotEnv, u_sim : UserSimulator, perturbator : Perturbator = None, learn = False, log = False,
-                 policy_type = "StackedMLP", hidden_size = 64, actor_lr=1e-4, critic_lr=1e-3, gamma=0.99, tau=0.001, buffer_size=10000, batch_size=64):
+                 policy_type = "StackedMLP", hidden_size = 512, actor_lr=1e-4, critic_lr=1e-4, gamma=0.99, tau=1e-4, decay_epsilon = 1, buffer_size=1e4, batch_size=1024,
+                 warmup_steps = 1000):
         """
 
         Initialize the ReinforceCorrector with environment, user simulator, and training parameters.
-        
+        inspiration fhttps://github.com/ghliu/pytorch-ddpg/blob/master/ddpg.py
         Args:
             env (GodotEnv): The Godot environment for running simulations
             u_sim (UserSimulator): User simulator for generating user movement actions
@@ -345,15 +353,18 @@ class DDPGCorrector(Corrector):
         self.act_lr = actor_lr  # Actor learning rate
         self.crit_lr = critic_lr  # Critic learning rate
 
+
         self.batch_size = batch_size  # Batch size (currently not used in implementation)
-        self.buffer_size = buffer_size  # Size of the replay buffer
+        self.buffer_size = int(buffer_size)  # Size of the replay buffer
         # Training configuration
         self.seed = 0
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
         # Neural networks for policy representation
         # Mean network: outputs the mean of the action distribution
         input_dim = 2
         self.action_dim = 2
+        logger.debug(f"policy type : {policy_type == 'StackedMLP'}")
         if policy_type == "MLP":
             input_dim = 2
         elif policy_type == "StackedMLP":
@@ -361,47 +372,195 @@ class DDPGCorrector(Corrector):
             input_dim = 2 * self.sequence_length
             self.input_buffer = inputBuffer(input_dim=input_dim, maxlen=self.sequence_length)
         else :
-            print("unknow policy net type")
+            logger.debug("unknow policy net type")
             raise NotImplementedError
         
         self.policy_type = policy_type
-        if policy_type != "LSTM":
+        if policy_type == "LSTM":
             print("unknow policy net type")
             raise NotImplementedError
         else:
             self.actor = DDPGActor(input_dim, self.action_dim, hidden_size, hidden_size).to(self.device)
-            self.actor_target = DDPGActor(input_dim, self.action_dim, hidden_size).to(self.device)
+            self.actor_target = DDPGActor(input_dim, self.action_dim, hidden_size, hidden_size).to(self.device)
 
             self.critic = DDPGCritic(input_dim, self.action_dim, hidden_size, hidden_size).to(self.device)
             self.critic_target = DDPGCritic(input_dim, self.action_dim, hidden_size, hidden_size).to(self.device)
 
-        
-        self.actor_optim = optim.Adam(self.actor.parameters(), lr=self.actor_lr)
-        self.critic_optim = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
+        hard_update(self.actor_target, self.actor)
+        hard_update(self.critic_target, self.critic)
+
+        self.actor_optim = optim.Adam(self.actor.parameters(), lr=self.act_lr)
+        self.critic_optim = optim.Adam(self.critic.parameters(), lr=self.crit_lr)
         
         self.env = env  # Godot environment for smart darts simulation
         self.sb = isinstance(self.env, StableBaselinesGodotEnv)
         self.u_sim = u_sim  # User simulator for generating human-like movements
         self.perturbator = perturbator  # Optional noise/perturbation module
+        
+        self.replay_buffer = DDPGReplayBuffer(max_size=self.buffer_size, input_shape=input_dim, action_shape=self.action_dim)
+        
+        # exploration noise decay over episodes
+        self.depislon = decay_epsilon  # decay espilon
+        self.epsilon = 10
+        self.warmup_steps = warmup_steps
+        
+        # training frequency
+        self.update_freq = 1000
+        self.steps_per_episode = int(1e5)
 
 
-        self.replay_buffer = deque(maxlen=self.buffer_size)
+    # def update_policy(self):
+    #     # Get tensors from the batch
+    #     state_batch, action_batch, reward_batch, next_state_batch, done_batch = self.replay_buffer.sample(self.batch_size, device=self.device)
 
-    def get_action(self, state, noise=0.1):
+    #     # Get the actions and the state values to compute the targets
+    #     next_action_batch = self.actor_target(next_state_batch)
+    #     next_state_action_values = self.critic_target(next_state_batch, next_action_batch.detach())
 
-        state = torch.FloatTensor(state).unsqueeze(0)
+    #     # Compute the target
+    #     reward_batch = reward_batch.unsqueeze(1)
+    #     done_batch = done_batch.unsqueeze(1)
+    #     expected_values = reward_batch + (1.0 - done_batch) * self.gamma * next_state_action_values
+
+    #     # TODO: Clipping the expected values here?
+    #     # expected_value = torch.clamp(expected_value, min_value, max_value)
+
+    #     # Update the critic network
+    #     self.actor_optim.zero_grad()
+    #     state_action_batch = self.critic(state_batch, action_batch)
+    #     value_loss = nn.MSELoss()(state_action_batch, expected_values.detach())
+    #     value_loss.backward()
+    #     self.critic_optim.step()
+
+    #     # Update the actor network
+    #     self.actor_optim.zero_grad()
+    #     policy_loss = -self.critic(state_batch, self.actor(state_batch))
+    #     policy_loss = policy_loss.mean()
+    #     policy_loss.backward()
+    #     self.actor_optim.step()
+
+    #     # Update the target networks
+    #     soft_update(self.actor_target, self.actor, self.tau)
+    #     soft_update(self.critic_target, self.critic, self.tau)
+
+    #     return value_loss.item(), policy_loss.item()
+
+    def update_policy(self):
+        # get batches from memory 
+        batch_states, batch_actions, batch_rewards, batch_next_states, batch_terminals = self.replay_buffer.sample(self.batch_size, device=self.device)
+
+        # compute target Q values
+        with torch.no_grad():
+            next_action = self.actor_target(batch_next_states)
+            next_q_values = self.critic_target(batch_next_states, next_action)
+            target_q_values = batch_rewards + (1 - batch_terminals.float()) * self.gamma * next_q_values # Error here ! 
+
+        # update critic
+        
+        q_batch = self.critic(batch_states, batch_actions)
+        q_loss = nn.MSELoss()(q_batch, target_q_values)
+        self.critic_optim.zero_grad()
+        q_loss.backward()
+        self.critic_optim.step()
+
+        # update actor
+        self.actor.zero_grad()
+        action = self.actor(batch_states)
+        policy_loss = -self.critic(batch_states, action).mean()
+        self.actor_optim.zero_grad()
+        policy_loss.backward()
+        self.actor_optim.step()
+
+        # update target networks
+        soft_update(self.actor_target, self.actor, self.tau)
+        soft_update(self.critic_target, self.critic, self.tau)
+
+    def act(self, state, noise=0.1):
+
+        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         action = self.actor(state)
-        action = action + noise * torch.float(np.random.randn(self.action_dim))
+        action = action + noise * torch.tensor(np.random.randn(self.action_dim), dtype=torch.float).to(self.device)
         # in base impl it is clamped
-        return action
+        return action.detach()
+    
 
-    def soft_update(target, source, tau):
-        for target_param, param in zip(target.parameters(), source.parameters()):
-            target_param.data.copy_(
-                target_param.data * (1.0 - tau) + param.data * tau
-            )
+    def learn(self, episodes):
+
+        rewards = []
+        
+        episode_step = 0
+        global_step = 0
+        for episode in range(episodes):
+        
+            reward_of_episode = 0
+            state = self.env.reset()
+
+            u_sim_inital = np.array(state["obs"][0][2:])
+            self.u_sim.reset(u_sim_inital)
+
+            if self.perturbator is not None:
+                u_sim_obs_displacement = self.perturbator(u_sim_obs_displacement)
+                
+
+            done = False
+            if self.policy_type != "MLP":
+                self.input_buffer.reset()
+            # self.replay_buffer.reset_buffer()
+            for step in range(self.steps_per_episode):
+                
+                if step == 0:
+                    u_sim_obs_displacement, u_sim_click_action  = self.u_sim.step(u_sim_inital[:2], state["obs"][0][2:]) 
+                    if self.perturbator is not None:
+                        u_sim_obs_displacement = self.perturbator(u_sim_obs_displacement)
+                
+                if global_step <= self.warmup_steps:
+                    # take random actions
+                    action = torch.randn(self.action_dim).unsqueeze(0).to(self.device)
+                else:
+                    action = self.act(u_sim_obs_displacement, noise=self.epsilon)
+                    # and decay noise over time
+                    if self.epsilon > 0:
+                        self.epsilon -= self.depislon
+                        self.epsilon = max(0, self.epsilon)
+
+                smartDart_action = np.insert(np.clip(action.to("cpu").detach().numpy(), -80, 80), 0 , u_sim_click_action)
+                smartDart_action = np.array([ smartDart_action for _ in range(self.env.num_envs) ])
+                
+                next_state, reward, done, _ = self.env.step(smartDart_action)
+                reward_of_episode += reward
+                # compute the next movement of user (next state)
+                next_state = np.array(next_state["obs"][0])
+                next_u_sim_obs_displacement, u_sim_click_action  = self.u_sim.step(next_state[:2], next_state[2:])
+                if self.perturbator is not None:
+                    next_u_sim_obs_displacement = self.perturbator(u_sim_obs_displacement)
+                
+                # observe the transisions
+                self.replay_buffer.store_transition(u_sim_obs_displacement, action, torch.tensor(reward).to(self.device), next_u_sim_obs_displacement, False)
+                # update policy
+                if global_step > self.warmup_steps and global_step % self.update_freq == 0:
+                    self.update_policy()
+
+                done = any(done)
+                if done:
+                    # logger.debug(f"replay buffer size = {self.replay_buffer.terminal_memory}")
+                    # logger.debug(f"done  = {done}")
+
+                    self.replay_buffer.store_transition(u_sim_obs_displacement, action, reward, next_u_sim_obs_displacement, True)
+                    episode_step = 0
+                    break   
 
 
+                u_sim_obs_displacement = deepcopy(next_u_sim_obs_displacement)
+                
+                global_step += 1
+                episode_step += 1
+
+            logger.debug(f"episode {episode} reward {reward_of_episode} done {done}")
+            rewards.append(reward_of_episode)
+            # self.replay_buffer.store_transition(u_sim_obs_displacement, action, reward, next_u_sim_obs_displacement, done)
+            # self.replay_buffer.store_transition(u_sim_obs_displacement, action, reward, next_u_sim_obs_displacement, done)
+
+        return rewards, reward_of_episode
 
 if __name__ == "__main__":
     
