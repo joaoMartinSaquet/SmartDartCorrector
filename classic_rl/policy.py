@@ -84,3 +84,36 @@ class DDPGCritic(nn.Module):
         x = self.fa(self.fc2(torch.cat([x, action], dim=1)))
         x = self.fc3(x)
         return x
+    
+
+class PPOActorCritic(nn.Module):
+    def __init__(self, input_dim, action_dim, hidden_dim):
+        super(PPOActorCritic, self).__init__()
+
+        # Shared layers
+        fa = nn.Tanh()
+        self.shared_net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            fa,
+            nn.Linear(hidden_dim, hidden_dim),
+            fa
+        )
+
+        # Actor's layers
+        self.actor_mean = nn.Linear(hidden_dim, action_dim)
+        self.actor_logstd = nn.Linear(hidden_dim, action_dim)
+
+        # Critic's layers
+        self.critic = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        shared_features = self.shared_net(x)
+
+        # Actor outputs
+        action_mean = self.actor_mean(shared_features)
+        action_logstd = self.actor_logstd(shared_features)
+
+        # Critic output
+        state_value = self.critic(shared_features)
+
+        return action_mean, action_logstd, state_value

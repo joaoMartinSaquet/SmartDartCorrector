@@ -110,12 +110,12 @@ if __name__ == "__main__":
         else :
             raise ValueError(f"Unknown method: {args.method}")
         
-        # env = StableBaselinesGodotEnv( n_parallel=n_parallel)
-        env = StableBaselinesGodotEnv(env_path="games/SmartDartEnvNormalized/smartDartEnv.x86_64", show_window=True, n_parallel=n_parallel)
+        env = StableBaselinesGodotEnv( n_parallel=n_parallel)
+        # env = StableBaselinesGodotEnv(env_path="games/SmartDartSingleEnv/smartDartEnv.x86_64", show_window=False, n_parallel=n_parallel)
 
         # Initialize user simulator
         u_sim = VITE_USim([0, 0])
-        Nruns = 1
+        Nruns = 10
         reward_runs = []
         reward_lists = []
         for i in range(Nruns):
@@ -124,13 +124,14 @@ if __name__ == "__main__":
                 n_episodes=100
                 logger.info(f"Reinforcement Learning training : {i+1} / {Nruns}")
                 # corr = ReinforceCorrector(env, u_sim, perturbator, hidden_size=256, learning_rate=1e-4, learn=True, log=True, policy_type="StackedMLP")
-                corr = DDPGCorrector(env, u_sim, perturbator, hidden_size=128, actor_lr=0.000405, critic_lr=0.0001102, batch_size=1024, learn=True, log=True, policy_type="MLP")
-                reward_list, final_reward = corr.training_loop(n_episodes)
+                # corr = DDPGCorrector(env, u_sim, perturbator, hidden_size=128, actor_lr=0.000405, critic_lr=0.0001102, batch_size=1024, learn=True, log=True, policy_type="MLP")
+                corr = PPOCorrector(env, u_sim, perturbator, hidden_size=256, learning_rate=1e-4, batch_size=1024, gamma=0.99, noptimsteps=10, clip_epsilon=0.2, gae_lambda=0.95, log=True, policy_type="MLP")
+                reward_list, final_reward = corr.train(n_episodes)
                 reward_runs.append(final_reward)
                 reward_lists.append(reward_list)
 
                 logger.info(f"final reward of iteration {i+1} : {final_reward}", )
-                file_name = "10_rl_corrector_None_stacked_mlp_DDPG.csv"
+                file_name = "10_rl_corrector_None_stacked_mlp_PPO.csv"
 
                 log_dict = {
                     "reward": reward_runs,

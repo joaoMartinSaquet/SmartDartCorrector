@@ -4,7 +4,7 @@ from gymnasium import spaces
 import numpy as np
 import tqdm
 from loguru import logger
-
+import torch
 
 from common.user_simulator import *
 from common.perturbation import *
@@ -208,7 +208,10 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
     return np.cumsum(reward_list), reward_list
 
 def action_to_msg(displacement, click, num_envs = 1):
-    displacement = np.clip(displacement.to("cpu").detach().numpy(), -MAX_DISP, MAX_DISP),
+    if torch.is_tensor(displacement):
+        displacement = displacement.to("cpu").detach().numpy()
+
+    displacement = np.clip(displacement, -MAX_DISP, MAX_DISP),
     action = np.insert(displacement, 0 , click)
     action = np.array([ action for _ in range(num_envs) ])
     return action
@@ -248,6 +251,8 @@ if __name__ == "__main__":
 
 def read_obs(obs, sb_env : bool):
     if sb_env:
-        return np.array(obs["obs"][0])
+        obs = np.array(obs["obs"][0])
     else:
-        return np.array(obs[0]["obs"])
+        obs = np.array(obs[0]["obs"])
+
+    return obs

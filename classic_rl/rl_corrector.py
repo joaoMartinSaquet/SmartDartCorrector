@@ -2,6 +2,7 @@ from collections import deque
 import numpy as np
 from torch import nn 
 from torch import optim
+from torch.distributions import MultivariateNormal
 import torch    
 from godot_rl.core.godot_env import GodotEnv
 import sys
@@ -11,9 +12,9 @@ import json
 import tqdm
 from copy import deepcopy
 
-from classic_rl.policy import REINFORCEnet, REINFORCELSTM,DDPGActor, DDPGCritic
+from classic_rl.policy import REINFORCEnet, REINFORCELSTM, DDPGActor, DDPGCritic, PPOActorCritic
 from classic_rl.policy import hard_update, soft_update
-from classic_rl.buffer import DDPGReplayBuffer
+from classic_rl.buffer import DDPGReplayBuffer, PPOReplayBuffer
 from common.user_simulator import *
 from common.perturbation import *
 from common.rolloutenv import *
@@ -328,7 +329,7 @@ class ReinforceCorrector(Corrector):
 
 class DDPGCorrector(Corrector):
     def __init__(self, env : GodotEnv, u_sim : UserSimulator, perturbator : Perturbator = None, learn = False, log = False,
-                 policy_type = "StackedMLP", hidden_size = 512, actor_lr=1e-3, critic_lr=1e-3, gamma=0.85, tau=1e-4, decay_epsilon = 1, buffer_size=1e5, batch_size=64,
+                 policy_type = "StackedMLP", hidden_size = 512, actor_lr=1e-3, critic_lr=1e-3, gamma=0.99, tau=1e-4, decay_epsilon = 1, buffer_size=1e5, batch_size=64, scale_observation = True,
                  update_interval = 1, warmup_steps = 0):
         """
 
@@ -410,46 +411,13 @@ class DDPGCorrector(Corrector):
         self.steps_per_episode = int(1e5)
 
         self.sb_env = isinstance(self.env, StableBaselinesGodotEnv)
+
+        self.scale_observation = scale_observation
         # print("is sb env ? ", self.sb_env)
 
 
-    # def update_policy(self):
-    #     # Get tensors from the batch
-    #     state_batch, action_batch, reward_batch, next_state_batch, done_batch = self.replay_buffer.sample(self.batch_size, device=self.device)
-
-    #     # Get the actions and the state values to compute the targets
-    #     next_action_batch = self.actor_target(next_state_batch)
-    #     next_state_action_values = self.critic_target(next_state_batch, next_action_batch.detach())
-
-    #     # Compute the target
-    #     reward_batch = reward_batch.unsqueeze(1)
-    #     done_batch = done_batch.unsqueeze(1)
-    #     expected_values = reward_batch + (1.0 - done_batch) * self.gamma * next_state_action_values
-
-    #     # TODO: Clipping the expected values here?
-    #     # expected_value = torch.clamp(expected_value, min_value, max_value)
-
-    #     # Update the critic network
-    #     self.actor_optim.zero_grad()
-    #     state_action_batch = self.critic(state_batch, action_batch)
-    #     value_loss = nn.MSELoss()(state_action_batch, expected_values.detach())
-    #     value_loss.backward()
-    #     self.critic_optim.step()
-
-    #     # Update the actor network
-    #     self.actor_optim.zero_grad()
-    #     policy_loss = -self.critic(state_batch, self.actor(state_batch))
-    #     policy_loss = policy_loss.mean()
-    #     policy_loss.backward()
-    #     self.actor_optim.step()
-
-    #     # Update the target networks
-    #     soft_update(self.actor_target, self.actor, self.tau)
-    #     soft_update(self.critic_target, self.critic, self.tau)
-
-    #     return value_loss.item(), policy_loss.item()
-
     def update_policy(self):
+        # logger.debug("update policy start ...")
 
         if len(self.replay_buffer) < self.batch_size:
             return
@@ -482,6 +450,7 @@ class DDPGCorrector(Corrector):
         # update target networks
         soft_update(self.actor_target, self.actor, self.tau)
         soft_update(self.critic_target, self.critic, self.tau)
+        # logger.debug("update policy end ...")
 
     def act(self, state, noise=0.1):
         if torch.is_tensor(state):
@@ -523,6 +492,9 @@ class DDPGCorrector(Corrector):
                     u_sim_obs_displacement, u_sim_click_action  = self.u_sim.compute_displacement(u_sim_inital[:2], state[2:]) 
                     if self.perturbator is not None:
                         u_sim_obs_displacement = self.perturbator(u_sim_obs_displacement)
+
+                    if self.scale_observation:
+                        u_sim_obs_displacement = (u_sim_obs_displacement + MAX_DISP)/(2 * MAX_DISP)
 
                     if self.policy_type == "stackedMLP":     
                         self.input_buffer.add(torch.tensor(u_sim_obs_displacement))
@@ -619,6 +591,8 @@ class DDPGCorrector(Corrector):
 
             # compute first u_sim movement 
             u_sim_displacement, u_sim_click_action = self.u_sim.step(current_state[2:], current_state[:2], self.perturbator)
+            if self.scale_observation:
+                u_sim_displacement = (np.array(u_sim_displacement) + MAX_DISP)/(2 * MAX_DISP)
 
             # episode loop
             for t in range(self.steps_per_episode):
@@ -639,7 +613,8 @@ class DDPGCorrector(Corrector):
                 next_state = read_obs(next_state, self.sb)
                 # compute next u_sim movement
                 next_u_sim_displacement, u_sim_click_action = self.u_sim.step(next_state[2:], next_state[:2], self.perturbator)
-                
+                if self.scale_observation:
+                    next_u_sim_displacement = (np.array(next_u_sim_displacement) + MAX_DISP)/(2 * MAX_DISP)
                 # print("reward : ", reward)
                 # observe the transition
                 reward_episode += reward
@@ -672,6 +647,165 @@ class DDPGCorrector(Corrector):
             self.epsilon -= self.depislon
             self.epsilon = max(0, self.epsilon)
 
+
+
+
+class PPOCorrector:
+    def __init__(self, env, u_sim, perturbator=None, log=False, policy_type="MLP", hidden_size=512, learning_rate=1e-3, gamma=0.99, noptimsteps=10, clip_epsilon=0.2, gae_lambda=0.95, batch_size=64,
+                 num_episodes=10):
+        super().__init__()
+        self.log = log
+        self.log_path = "logs_corrector/PPO/" + time.strftime("%Y%m%d-%H%M%S")
+
+        self.gamma = gamma
+        self.clip_epsilon = clip_epsilon
+        self.gae_lambda = gae_lambda
+        self.batch_size = batch_size
+        self.num_episodes = num_episodes
+        self.noptimsteps = noptimsteps
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.action_dim = 2
+        input_dim = 2
+        
+
+        if policy_type == "StackedMLP":
+            self.sequence_length = 10
+            self.input_buffer = inputBuffer(input_dim=2, maxlen=self.sequence_length)
+            input_dim = 2 * self.sequence_length
+        elif policy_type != "MLP":
+            raise NotImplementedError("Unknown policy net type")
+
+        self.policy_type = policy_type
+
+        self.actor_critic = PPOActorCritic(input_dim, self.action_dim, hidden_size).to(self.device)
+        self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
+
+        self.env = env
+        self.u_sim = u_sim
+        self.perturbator = perturbator
+        self.replay_buffer = PPOReplayBuffer()
+        self.sb = isinstance(self.env, StableBaselinesGodotEnv)
+
+     
+    def get_action(self, state):
+        if self.policy_type == "StackedMLP":
+            self.input_buffer.update(state)
+            state_input = self.input_buffer.get().flatten()
+        else:
+            state_input = state
+
+        state_tensor = torch.tensor(state_input).to(torch.float).unsqueeze(0).to(self.device)
+        action_mean, action_logstd, state_value = self.actor_critic(state_tensor)
+
+        cov_mat = torch.diag_embed(torch.exp(action_logstd))
+        dist = MultivariateNormal(action_mean, cov_mat)
+        action = dist.sample()
+
+        log_prob = dist.log_prob(action)
+
+        return action.cpu().numpy().flatten(), log_prob.detach(), state_value.detach()
+    
+    def compute_gae(self, rewards, values, dones):
+        advantages = []
+        gae = 0
+        next_value = 0
+        for t in reversed(range(len(rewards))):
+            if dones[t]:
+                delta = rewards[t] - values[t]
+                gae = delta
+            else:
+                delta = rewards[t] + self.gamma * next_value - values[t]
+                gae = delta + self.gamma * self.gae_lambda * gae
+            advantages.insert(0, gae)
+            next_value = values[t]
+        return torch.stack(advantages)
+
+    def ppo_update(self):
+        states = torch.tensor(np.array(self.replay_buffer.states)).to(torch.float).to(self.device)
+        actions = torch.tensor(np.array(self.replay_buffer.actions)).to(torch.float).to(self.device)
+        old_log_probs = torch.tensor(self.replay_buffer.log_probs).to(torch.float).to(self.device)
+        rewards = torch.tensor(np.array(self.replay_buffer.rewards)).to(torch.float).to(self.device)
+        values = torch.tensor(self.replay_buffer.values).to(torch.float).to(self.device)
+        dones = torch.tensor(np.array(self.replay_buffer.dones)).to(torch.float).to(self.device)
+
+        advantages = self.compute_gae(rewards, values, dones)
+        logger.debug(f"advantages {advantages.mean()} {advantages.std()}")
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        criterion = nn.MSELoss()
+        for _ in range(self.noptimsteps):
+
+            action_means, action_logstds, state_values = self.actor_critic(states)
+            cov_mats = torch.diag_embed(torch.exp(action_logstds))
+            dists = MultivariateNormal(action_means, cov_mats)
+            new_log_probs = dists.log_prob(actions)
+        
+            ratio = (new_log_probs - old_log_probs).exp()
+            surr1 = ratio * advantages
+            surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * advantages
+            actor_loss = -torch.min(surr1, surr2).mean()
+
+            # logger.debug(f"state_values {rewards.shape}")
+            critic_loss = criterion(state_values, rewards)
+
+            loss = actor_loss + 0.5 * critic_loss
+            # logger.debug(f"critic_loss {critic_loss}")
+            # logger.debug(f"actor_loss {actor_loss}")
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+        self.replay_buffer.clear()
+
+    def train(self, n_episodes):
+
+
+        reward_list = []
+        for episode in range(n_episodes):
+            done = False
+            episode_reward = 0
+
+            # reset the environment
+            if self.sb:
+                current_state = self.env.reset()
+            else:
+                current_state, _ = self.env.reset()
+
+            current_state = read_obs(current_state, self.sb)
+            self.u_sim.reset(current_state[2:])
+            u_sim_displacement, u_sim_click_action = self.u_sim.step(current_state[2:], current_state[:2], self.perturbator)
+            step = 0
+            while not done:
+
+                # compute the action from the displacement of user simulation
+                action, log_prob, value = self.get_action(u_sim_displacement)
+
+                msg_step = action_to_msg(action, u_sim_click_action, self.env.num_envs)
+                if self.sb :
+                    next_state, reward, done, _ = self.env.step(msg_step)
+                else :
+                    next_state, reward, done, _, _ = self.env.step(msg_step)
+                    reward = reward[0]
+
+                # observe and memorise the transition
+                self.replay_buffer.add(u_sim_displacement, action, reward, value, log_prob, done)
+                episode_reward += reward
+
+
+                # compute u_sim from next state
+                next_state = read_obs(next_state, self.sb)
+                u_sim_displacement, u_sim_click_action = self.u_sim.step(next_state[2:], next_state[:2], self.perturbator)
+
+                step += 1
+                if len(self.replay_buffer) >= self.batch_size:  
+                    self.ppo_update()
+
+            print(f'Episode: {episode + 1}, Reward: {episode_reward}, Done: {done}, steps {step + 1}')
+            reward_list.append(episode_reward)
+
+        return reward_list, episode_reward
+        
 if __name__ == "__main__":
     
 
