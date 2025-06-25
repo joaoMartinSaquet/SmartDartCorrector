@@ -49,7 +49,7 @@ def stepSmartDartEnv(env, obs, u_simulator : UserSimulator, perturbator : Pertur
         Does not work we need to place our corrector inside... 
     """
     obs = np.array(observation[0]["obs"])
-    move_action, click_action = u_simulator.step(obs[:2], obs[2:])
+    move_action, click_action = u_simulator.compute_displacement(obs[:2], obs[2:])
     
     # clamp action to don't have to big displacement
     move_action = np.clip(move_action, -MAX_DISP, MAX_DISP)
@@ -84,7 +84,7 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
     for i in range(Nstep):
         # get controller actions and process it (clamp, norm, pert, etc...)
         obs = np.array(observation[0]["obs"])
-        move_action, click_action = u_simulator.step(obs[:2], obs[2:])
+        move_action, click_action = u_simulator.compute_displacement(obs[:2], obs[2:])
 
         # convert moveaction to numpy
         move_action = np.array(move_action)
@@ -166,7 +166,7 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
                 obs = np.array(observation["obs"][k])
             else :
                 obs = np.array(observation[k]["obs"])
-            move_action, click_action = u_sim.step(obs[:2], obs[2:])
+            move_action, click_action = u_sim.compute_displacement(obs[:2], obs[2:])
             move_actions.append(move_action)
             click_actions.append(click_action)
 
@@ -193,6 +193,7 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
             observation, reward, done, _ = env.step(action)
         else :
             observation, reward, done, info, _ = env.step(action)
+            reward = reward[0]
         # print("observations = ", observation)
         # update reward list
         reward_list.append(reward)
@@ -205,6 +206,12 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
             break
 
     return np.cumsum(reward_list), reward_list
+
+def action_to_msg(displacement, click, num_envs = 1):
+    displacement = np.clip(displacement.to("cpu").detach().numpy(), -MAX_DISP, MAX_DISP),
+    action = np.insert(displacement, 0 , click)
+    action = np.array([ action for _ in range(num_envs) ])
+    return action
 
 
 if __name__ == "__main__":
@@ -239,4 +246,8 @@ if __name__ == "__main__":
     
 
 
-        
+def read_obs(obs, sb_env : bool):
+    if sb_env:
+        return np.array(obs["obs"][0])
+    else:
+        return np.array(obs[0]["obs"])

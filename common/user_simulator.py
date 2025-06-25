@@ -7,7 +7,7 @@ class UserSimulator():
     def __init__(self):
         pass
 
-    def step(self):
+    def compute_displacement(self):
         pass
 
     def reset(self):
@@ -68,7 +68,7 @@ class VITE_USim(UserSimulator):
         
         
 
-    def step(self, y_target, y_process):
+    def compute_displacement(self, y_target, y_process):
         """_summary_
 
         Args:
@@ -103,3 +103,13 @@ class VITE_USim(UserSimulator):
         action = [xxdot[0] , xydot[0]]
 
         return action, click_action
+    
+
+    def step(self, y_target, y_process, pertubator):
+        
+        displacement, click = self.compute_displacement(y_target, y_process)
+
+        if pertubator is not None:
+            displacement = pertubator(displacement)
+
+        return displacement, click

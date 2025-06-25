@@ -218,7 +218,7 @@ class ReinforceCorrector(Corrector):
                     obs = np.array(observation[0]["obs"])
 
                 # get simulator movements 
-                move_action, click_action = self.u_sim.step(obs[:2], obs[2:])
+                move_action, click_action = self.u_sim.compute_displacement(obs[:2], obs[2:])
 
                 # pertubate the movement if there is any perturbation
                 if self.perturbator is not None:
@@ -328,8 +328,8 @@ class ReinforceCorrector(Corrector):
 
 class DDPGCorrector(Corrector):
     def __init__(self, env : GodotEnv, u_sim : UserSimulator, perturbator : Perturbator = None, learn = False, log = False,
-                 policy_type = "StackedMLP", hidden_size = 512, actor_lr=1e-4, critic_lr=1e-4, gamma=0.99, tau=1e-4, decay_epsilon = 1, buffer_size=1e4, batch_size=1024,
-                 warmup_steps = 1000):
+                 policy_type = "StackedMLP", hidden_size = 512, actor_lr=1e-3, critic_lr=1e-3, gamma=0.85, tau=1e-4, decay_epsilon = 1, buffer_size=1e5, batch_size=64,
+                 update_interval = 1, warmup_steps = 0):
         """
 
         Initialize the ReinforceCorrector with environment, user simulator, and training parameters.
@@ -364,13 +364,14 @@ class DDPGCorrector(Corrector):
         # Mean network: outputs the mean of the action distribution
         input_dim = 2
         self.action_dim = 2
-        logger.debug(f"policy type : {policy_type == 'StackedMLP'}")
+        input_dim = 2
         if policy_type == "MLP":
             input_dim = 2
         elif policy_type == "StackedMLP":
+
             self.sequence_length = 10
-            input_dim = 2 * self.sequence_length
             self.input_buffer = inputBuffer(input_dim=input_dim, maxlen=self.sequence_length)
+            input_dim = 2*self.sequence_length
         else :
             logger.debug("unknow policy net type")
             raise NotImplementedError
@@ -401,12 +402,15 @@ class DDPGCorrector(Corrector):
         
         # exploration noise decay over episodes
         self.depislon = decay_epsilon  # decay espilon
-        self.epsilon = 10
+        self.epsilon = 0
         self.warmup_steps = warmup_steps
         
         # training frequency
-        self.update_freq = 1000
+        self.update_freq = update_interval
         self.steps_per_episode = int(1e5)
+
+        self.sb_env = isinstance(self.env, StableBaselinesGodotEnv)
+        # print("is sb env ? ", self.sb_env)
 
 
     # def update_policy(self):
@@ -446,11 +450,15 @@ class DDPGCorrector(Corrector):
     #     return value_loss.item(), policy_loss.item()
 
     def update_policy(self):
+
+        if len(self.replay_buffer) < self.batch_size:
+            return
         # get batches from memory 
         batch_states, batch_actions, batch_rewards, batch_next_states, batch_terminals = self.replay_buffer.sample(self.batch_size, device=self.device)
 
         # compute target Q values
         with torch.no_grad():
+            # need to handkle the batch next states ... 
             next_action = self.actor_target(batch_next_states)
             next_q_values = self.critic_target(batch_next_states, next_action)
             target_q_values = batch_rewards + (1 - batch_terminals.float()) * self.gamma * next_q_values # Error here ! 
@@ -476,11 +484,13 @@ class DDPGCorrector(Corrector):
         soft_update(self.critic_target, self.critic, self.tau)
 
     def act(self, state, noise=0.1):
-
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        if torch.is_tensor(state):
+            state = state.float().to(self.device)
+        else:
+            state = torch.tensor(state, dtype=torch.float).to(self.device)
+        state = state.float().to(self.device)
         action = self.actor(state)
         action = action + noise * torch.tensor(np.random.randn(self.action_dim), dtype=torch.float).to(self.device)
-        # in base impl it is clamped
         return action.detach()
     
 
@@ -495,7 +505,8 @@ class DDPGCorrector(Corrector):
             reward_of_episode = 0
             state = self.env.reset()
 
-            u_sim_inital = np.array(state["obs"][0][2:])
+            state = read_obs(state, self.sb_env)
+            u_sim_inital = np.array(state[2:])
             self.u_sim.reset(u_sim_inital)
 
             if self.perturbator is not None:
@@ -509,48 +520,69 @@ class DDPGCorrector(Corrector):
             for step in range(self.steps_per_episode):
                 
                 if step == 0:
-                    u_sim_obs_displacement, u_sim_click_action  = self.u_sim.step(u_sim_inital[:2], state["obs"][0][2:]) 
+                    u_sim_obs_displacement, u_sim_click_action  = self.u_sim.compute_displacement(u_sim_inital[:2], state[2:]) 
                     if self.perturbator is not None:
                         u_sim_obs_displacement = self.perturbator(u_sim_obs_displacement)
-                
-                if global_step <= self.warmup_steps:
+
+                    if self.policy_type == "stackedMLP":     
+                        self.input_buffer.add(torch.tensor(u_sim_obs_displacement))
+                        current_usim_disps = self.input_buffer.get().reshape(1 ,self.sequence_length * 2)
+                if global_step < self.warmup_steps:
                     # take random actions
-                    action = torch.randn(self.action_dim).unsqueeze(0).to(self.device)
+                    action = torch.randn(self.action_dim).to(self.device)
                 else:
-                    action = self.act(u_sim_obs_displacement, noise=self.epsilon)
+                    if self.policy_type == "MLP":
+                        action = self.act(torch.tensor(u_sim_obs_displacement), noise=self.epsilon)
+                    else : 
+                        action = self.act(current_usim_disps, noise=self.epsilon)
                     # and decay noise over time
                     if self.epsilon > 0:
                         self.epsilon -= self.depislon
                         self.epsilon = max(0, self.epsilon)
-
+                
+                
                 smartDart_action = np.insert(np.clip(action.to("cpu").detach().numpy(), -80, 80), 0 , u_sim_click_action)
                 smartDart_action = np.array([ smartDart_action for _ in range(self.env.num_envs) ])
                 
+                # logger.debug(f"smartDart_action {smartDart_action} "    )
                 next_state, reward, done, _ = self.env.step(smartDart_action)
                 reward_of_episode += reward
                 # compute the next movement of user (next state)
+                
                 next_state = np.array(next_state["obs"][0])
-                next_u_sim_obs_displacement, u_sim_click_action  = self.u_sim.step(next_state[:2], next_state[2:])
+                next_u_sim_obs_displacement, u_sim_click_action  = self.u_sim.compute_displacement(next_state[:2], next_state[2:])
                 if self.perturbator is not None:
                     next_u_sim_obs_displacement = self.perturbator(u_sim_obs_displacement)
-                
+
+                 
                 # observe the transisions
+                if self.policy_type == "stackedMLP":
+                    self.input_buffer.add(torch.tensor(next_u_sim_obs_displacement))
+                    next_u_sim_obs_displacement = deepcopy(self.input_buffer.get()).reshape(1 ,self.sequence_length * 2)
+                    u_sim_obs_displacement = deepcopy(current_usim_disps).reshape(1 ,self.sequence_length * 2)
+                else :
+                    u_sim_obs_displacement = next_u_sim_obs_displacement
                 self.replay_buffer.store_transition(u_sim_obs_displacement, action, torch.tensor(reward).to(self.device), next_u_sim_obs_displacement, False)
                 # update policy
                 if global_step > self.warmup_steps and global_step % self.update_freq == 0:
                     self.update_policy()
 
-                done = any(done)
+                if self.sb_env:
+                    done = done
+                else :
+                    done = done[0]
                 if done:
                     # logger.debug(f"replay buffer size = {self.replay_buffer.terminal_memory}")
                     # logger.debug(f"done  = {done}")
 
-                    self.replay_buffer.store_transition(u_sim_obs_displacement, action, reward, next_u_sim_obs_displacement, True)
+                    self.replay_buffer.store_transition(u_sim_obs_displacement, action, torch.tensor(reward).to(self.device), next_u_sim_obs_displacement, True)
                     episode_step = 0
                     break   
 
-
-                u_sim_obs_displacement = deepcopy(next_u_sim_obs_displacement)
+                if self.policy_type != "stackedMLP":
+                    current_usim_disps = deepcopy(next_u_sim_obs_displacement)
+                else:
+                    u_sim_obs_displacement = deepcopy(next_u_sim_obs_displacement)
                 
                 global_step += 1
                 episode_step += 1
@@ -561,6 +593,84 @@ class DDPGCorrector(Corrector):
             # self.replay_buffer.store_transition(u_sim_obs_displacement, action, reward, next_u_sim_obs_displacement, done)
 
         return rewards, reward_of_episode
+
+
+    def training_loop(self, num_episode):
+        
+        rewards = []
+
+        global_step = 0
+        for i in range(num_episode):
+            
+            current_episode_steps = 0
+            reward_episode = 0
+            done = False
+
+            # reset the environment
+            if self.sb:
+                current_state = self.env.reset()
+            else:
+                current_state, _ = self.env.reset()
+
+            current_state = read_obs(current_state, self.sb)
+            # reset u_sim for current episode
+            
+            self.u_sim.reset(current_state[2:])
+
+            # compute first u_sim movement 
+            u_sim_displacement, u_sim_click_action = self.u_sim.step(current_state[2:], current_state[:2], self.perturbator)
+
+            # episode loop
+            for t in range(self.steps_per_episode):
+                    
+
+                # observe state and select action
+                action_corrector = self.act(u_sim_displacement, self.epsilon)
+                self.decay_epsilon()
+
+                # step environment
+                msg_step = action_to_msg(action_corrector, u_sim_click_action, self.env.num_envs)
+                if self.sb :
+                    next_state, reward, done, _ = self.env.step(msg_step)
+                else :
+                    next_state, reward, done, _, _ = self.env.step(msg_step)
+                    reward = reward[0]
+
+                next_state = read_obs(next_state, self.sb)
+                # compute next u_sim movement
+                next_u_sim_displacement, u_sim_click_action = self.u_sim.step(next_state[2:], next_state[:2], self.perturbator)
+                
+                # print("reward : ", reward)
+                # observe the transition
+                reward_episode += reward
+                self.replay_buffer.store_transition(torch.tensor(u_sim_displacement), action_corrector, torch.tensor(reward).to(self.device), torch.tensor(next_u_sim_displacement), done)
+
+                # update policy
+                self.update_policy()
+
+                # if  global_step % self.update_freq == 0 & global_step > 0:
+                #     self.update_policy()
+
+                u_sim_displacement = next_u_sim_displacement
+                current_episode_steps += 1
+                global_step += 1
+
+                if any(done):
+
+                    # logger.debug(f"replay buffer size = {self.replay_buffer.terminal_memory}")
+                    logger.debug(f"done  = {done}")
+                    break
+
+            logger.debug(f"episode {i} reward {reward_episode} done {done}, episodes steps {current_episode_steps}")
+            rewards.append(reward_episode)
+
+        return rewards, reward_episode
+
+
+    def decay_epsilon(self):
+        if self.epsilon > 0:
+            self.epsilon -= self.depislon
+            self.epsilon = max(0, self.epsilon)
 
 if __name__ == "__main__":
     

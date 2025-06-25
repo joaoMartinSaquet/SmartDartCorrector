@@ -29,14 +29,19 @@ class DDPGReplayBuffer():
 
     def sample(self, batch_size, device):
 
+
         max_mem = min(self.mem_cntr, self.mem_size)
         batch = np.random.choice(max_mem, batch_size)
-        states = torch.tensor(self.state_memory)[batch].to(torch.float).to(device).reshape(batch_size, -1)
-        actions = torch.cat(list(self.action_memory))[batch].to(torch.float).to(device).reshape(batch_size, -1)
-        rewards = torch.tensor(self.reward_memory)[batch].to(torch.float).unsqueeze(1).to(device).reshape(batch_size, -1)
-        next_states = torch.tensor(self.new_state_memory)[batch].to(torch.float).to(device).reshape(batch_size, -1)
-        terminals = torch.tensor(list(self.terminal_memory))[batch].to(torch.float).to(device).reshape(batch_size, -1)
+        # logger.debug(f"batch is : {self.state_memory}")
+        states = torch.stack(list(self.state_memory))[batch].to(torch.float).to(device).reshape(batch_size, -1)
+        actions = torch.stack(list(self.action_memory))[batch].to(torch.float).to(device).reshape(batch_size, -1)
+
         
+        rewards = torch.stack(list(self.reward_memory))[batch].to(torch.float).unsqueeze(1).to(device).reshape(batch_size, -1)
+        # print("newt state memory ", len(self.new_state_memory[0]))
+        next_states = torch.stack(list(self.new_state_memory))[batch].to(torch.float).to(device).reshape(batch_size, -1)
+        terminals = torch.tensor(list(self.terminal_memory))[batch].to(torch.float).to(device).reshape(batch_size, -1)
+
         return states, actions, rewards, next_states, terminals
     
 
@@ -48,3 +53,6 @@ class DDPGReplayBuffer():
         self.reward_memory.clear()
         self.terminal_memory.clear()
         self.mem_cntr = 0
+
+    def __len__(self):
+        return len(self.state_memory)   
