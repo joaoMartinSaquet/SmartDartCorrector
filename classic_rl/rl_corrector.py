@@ -647,12 +647,9 @@ class DDPGCorrector(Corrector):
             self.epsilon -= self.depislon
             self.epsilon = max(0, self.epsilon)
 
-
-
-
 class PPOCorrector:
-    def __init__(self, env, u_sim, perturbator=None, log=False, policy_type="MLP", hidden_size=512, learning_rate=1e-3, gamma=0.99, noptimsteps=10, clip_epsilon=0.2, gae_lambda=0.95, batch_size=64,
-                 num_episodes=10):
+    def __init__(self, env, u_sim, perturbator=None, log=False, policy_type="MLP", hidden_size=512, lr_actor=1e-3, lr_critic = 1e-3, gamma=0.99, noptimsteps=7, clip_epsilon=0.2, gae_lambda=0.95, batch_size=64, vf_loss_coef=0.5,
+                 action_std_init = 0.6, decay_action_std = 0.05, min_action_std = 0.1, num_episodes=10):
         super().__init__()
         self.log = log
         self.log_path = "logs_corrector/PPO/" + time.strftime("%Y%m%d-%H%M%S")
@@ -663,6 +660,11 @@ class PPOCorrector:
         self.batch_size = batch_size
         self.num_episodes = num_episodes
         self.noptimsteps = noptimsteps
+        self.vf_loss_coef = vf_loss_coef
+        
+        self.action_std = action_std_init
+        self.decay_action_std_rate = decay_action_std
+        self.min_action_std = min_action_std
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.action_dim = 2
@@ -678,8 +680,14 @@ class PPOCorrector:
 
         self.policy_type = policy_type
 
-        self.actor_critic = PPOActorCritic(input_dim, self.action_dim, hidden_size).to(self.device)
-        self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
+        self.policy = PPOActorCritic(input_dim, self.action_dim, hidden_size, action_std_init, self.device)
+        self.optimizer = torch.optim.Adam([
+                        {'params': self.policy.actor.parameters(), 'lr': lr_actor},
+                        {'params': self.policy.critic.parameters(), 'lr': lr_critic}
+                    ])
+
+        self.old_policy = PPOActorCritic(input_dim, self.action_dim, hidden_size, action_std_init, self.device)
+        self.old_policy.load_state_dict(self.policy.state_dict())
 
         self.env = env
         self.u_sim = u_sim
@@ -687,24 +695,33 @@ class PPOCorrector:
         self.replay_buffer = PPOReplayBuffer()
         self.sb = isinstance(self.env, StableBaselinesGodotEnv)
 
-     
-    def get_action(self, state):
-        if self.policy_type == "StackedMLP":
-            self.input_buffer.update(state)
-            state_input = self.input_buffer.get().flatten()
-        else:
-            state_input = state
+        self.max_ep_len = 5000
+        self.update_freq = self.max_ep_len * 0.2
+        self.max_timesteps = 1e6
+    
+    def set_action_std(self, new_action_std):
+        self.action_std = new_action_std
+        self.policy.set_action_std(new_action_std)
+        self.old_policy.set_action_std(new_action_std)
+    
+    def decay_action_std(self):
 
-        state_tensor = torch.tensor(state_input).to(torch.float).unsqueeze(0).to(self.device)
-        action_mean, action_logstd, state_value = self.actor_critic(state_tensor)
+        self.action_std = round(self.action_std - self.decay_action_std_rate, 4)
+        self.action_std = max(self.min_action_std, self.action_std)
+        self.set_action_std(self.action_std)
 
-        cov_mat = torch.diag_embed(torch.exp(action_logstd))
-        dist = MultivariateNormal(action_mean, cov_mat)
-        action = dist.sample()
+    def select_action(self, state):
 
-        log_prob = dist.log_prob(action)
+        state_tensor = torch.tensor(state).to(torch.float).to(self.device)
+        action_mean, action_logprob, state_value = self.old_policy.act(state_tensor)
 
-        return action.cpu().numpy().flatten(), log_prob.detach(), state_value.detach()
+        self.replay_buffer.states.append(state_tensor)
+        self.replay_buffer.actions.append(action_mean)
+        self.replay_buffer.log_probs.append(action_logprob)
+        self.replay_buffer.values.append(state_value)
+        # logger.debug(f"action log prob : {log_prob}")
+        return action_mean.cpu().numpy().flatten()
+
     
     def compute_gae(self, rewards, values, dones):
         advantages = []
@@ -721,51 +738,86 @@ class PPOCorrector:
             next_value = values[t]
         return torch.stack(advantages)
 
-    def ppo_update(self):
-        states = torch.tensor(np.array(self.replay_buffer.states)).to(torch.float).to(self.device)
-        actions = torch.tensor(np.array(self.replay_buffer.actions)).to(torch.float).to(self.device)
-        old_log_probs = torch.tensor(self.replay_buffer.log_probs).to(torch.float).to(self.device)
-        rewards = torch.tensor(np.array(self.replay_buffer.rewards)).to(torch.float).to(self.device)
-        values = torch.tensor(self.replay_buffer.values).to(torch.float).to(self.device)
-        dones = torch.tensor(np.array(self.replay_buffer.dones)).to(torch.float).to(self.device)
+    def computre_return (self, rewards, dones):
+        returns = []
+        discounted_reward = 0
+        for r, d in zip(reversed(rewards), reversed(dones)):
 
-        advantages = self.compute_gae(rewards, values, dones)
-        logger.debug(f"advantages {advantages.mean()} {advantages.std()}")
+            if d: discounted_reward = 0
+
+            discounted_reward = r + self.gamma * discounted_reward
+            returns.insert(0, discounted_reward)
+
+        return torch.stack(returns)
+    
+    def ppo_update(self):
+
+
+        old_states = torch.squeeze(torch.stack(self.replay_buffer.states, dim=0)).detach().to(torch.float).to(self.device)
+        old_actions = torch.squeeze(torch.stack(self.replay_buffer.actions, dim=0)).detach().to(torch.float).to(self.device)
+        old_log_probs = torch.squeeze(torch.stack(self.replay_buffer.log_probs, dim=0)).detach().to(torch.float).to(self.device)
+        old_values = torch.squeeze(torch.stack(self.replay_buffer.values).to(torch.float)).detach().to(self.device)
+        rewards = torch.tensor(np.array(self.replay_buffer.rewards)).detach().to(torch.float).to(self.device) #self.replay_buffer.rewards
+
+        dones = torch.tensor(np.array(self.replay_buffer.dones)).to(torch.float).to(self.device)
+        
+        advantages = self.compute_gae(rewards, old_values, dones)
+        # returns  = self.computre_return(rewards, dones)
+        # torch.tensor(advantages).to(self.device)
+
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         criterion = nn.MSELoss()
-        for _ in range(self.noptimsteps):
 
-            action_means, action_logstds, state_values = self.actor_critic(states)
-            cov_mats = torch.diag_embed(torch.exp(action_logstds))
-            dists = MultivariateNormal(action_means, cov_mats)
-            new_log_probs = dists.log_prob(actions)
-        
-            ratio = (new_log_probs - old_log_probs).exp()
+
+        for _ in range(self.noptimsteps):
+            
+            logprobs, values, dist_entropy = self.policy.evaluate(old_states, old_actions)
+
+            # pi_theta / pi_old_theta
+            ratio = torch.exp(logprobs - old_log_probs)
+
+            
+            # surrogate loss
             surr1 = ratio * advantages
             surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * advantages
-            actor_loss = -torch.min(surr1, surr2).mean()
+            # final loss
 
-            # logger.debug(f"state_values {rewards.shape}")
-            critic_loss = criterion(state_values, rewards)
+            actor_loss = -torch.min(surr1, surr2) # weird one
+            critic_loss = criterion(values, rewards) 
+            
 
-            loss = actor_loss + 0.5 * critic_loss
-            # logger.debug(f"critic_loss {critic_loss}")
-            # logger.debug(f"actor_loss {actor_loss}")
+            loss = actor_loss + self.vf_loss_coef * critic_loss - 0.01 * dist_entropy
+            # logger.debug(f" loss {loss}")
+            # update actor-critic
             self.optimizer.zero_grad()
-            loss.backward()
+            loss.mean().backward()
             self.optimizer.step()
 
+        # update policy loss 
+        self.old_policy.load_state_dict(self.policy.state_dict())
+
+        # clear buffer 
         self.replay_buffer.clear()
 
     def train(self, n_episodes):
 
-
+        episode = 0
+        
         reward_list = []
-        for episode in range(n_episodes):
-            done = False
-            episode_reward = 0
+        current_ep_reward = 0
 
+
+        t_step = 0
+        log_freq = self.max_ep_len
+        
+        running_log_reward = 0
+        running_log_episode = 0
+        max_timesteps = 1e6
+        while t_step <= max_timesteps:
+            
+            ep_reward = 0
+            
             # reset the environment
             if self.sb:
                 current_state = self.env.reset()
@@ -775,37 +827,133 @@ class PPOCorrector:
             current_state = read_obs(current_state, self.sb)
             self.u_sim.reset(current_state[2:])
             u_sim_displacement, u_sim_click_action = self.u_sim.step(current_state[2:], current_state[:2], self.perturbator)
-            step = 0
-            while not done:
 
-                # compute the action from the displacement of user simulation
-                action, log_prob, value = self.get_action(u_sim_displacement)
+            for t in range(self.max_ep_len):
 
-                msg_step = action_to_msg(action, u_sim_click_action, self.env.num_envs)
+                # select action with policy
+                action = self.select_action(u_sim_displacement)
+                
+
+                msg_step = action_to_msg(action * MAX_DISP, u_sim_click_action, self.env.num_envs) # * MAXDISP like that we keep the action 
                 if self.sb :
                     next_state, reward, done, _ = self.env.step(msg_step)
                 else :
                     next_state, reward, done, _, _ = self.env.step(msg_step)
                     reward = reward[0]
+                    done = any(done)
 
-                # observe and memorise the transition
-                self.replay_buffer.add(u_sim_displacement, action, reward, value, log_prob, done)
-                episode_reward += reward
+                # observe reward and terminal
+                self.replay_buffer.rewards.append(reward)
+                self.replay_buffer.dones.append(done)
 
+                ep_reward += reward
+                t_step += 1
+
+                if t_step % self.update_freq == 0:
+                    self.ppo_update()
+                if t_step % int(2e5) == 0:
+                    self.decay_action_std()
+            
+                if done:
+                    break
 
                 # compute u_sim from next state
                 next_state = read_obs(next_state, self.sb)
                 u_sim_displacement, u_sim_click_action = self.u_sim.step(next_state[2:], next_state[:2], self.perturbator)
 
-                step += 1
-                if len(self.replay_buffer) >= self.batch_size:  
+
+                if t_step % log_freq == 0:
+
+                    log_avg_reward = running_log_reward / (running_log_episode + 1)
+                    # log_avg_reward = round(log_avg_reward, 4)
+                    logger.info(f"episode {episode} step {t_step} reward {log_avg_reward}")
+                    
+                    reward_list.append(log_avg_reward)
+                    running_log_reward = 0
+                    running_log_episode = 0
+                    # logger.debug(f"action {action} u_sim {u_sim_displacement}")
+
+            running_log_reward += ep_reward
+            running_log_episode += 1 
+            episode += 1
+
+        return reward_list, ep_reward
+
+
+    def train_claissic_env(self, env, n_episodes):
+        # printing and logging variables
+        print_running_reward = 0
+        print_running_episodes = 1
+
+        log_running_reward = 0
+        log_running_episodes = 1
+
+        time_step = 0
+        i_episode = 0
+        max_ep_len = 1000
+        max_training_timesteps = 1e5
+        # training loop
+        while time_step <= max_training_timesteps:
+            
+            state, _ = env.reset()
+            print("state = ", state)
+            current_ep_reward = 0
+
+            for t in range(1, max_ep_len+1):
+                
+                # select action with policy
+                action = self.select_action(state)
+                state, reward, done, _, _ = env.step(action)
+                
+                # saving reward and is_terminals
+                self.replay_buffer.rewards.append(reward)
+                self.replay_buffer.dones.append(done)
+                
+                time_step +=1
+                current_ep_reward += reward
+
+                # update PPO agent
+                if time_step % self.update_freq == 0:
                     self.ppo_update()
 
-            print(f'Episode: {episode + 1}, Reward: {episode_reward}, Done: {done}, steps {step + 1}')
-            reward_list.append(episode_reward)
+                # if continuous action space; then decay action std of ouput action distribution
 
-        return reward_list, episode_reward
-        
+                self.decay_action_std()
+
+                # log in logging file
+                if time_step % max_ep_len * 2 == 0:
+
+                    # log average reward till last episode
+                    log_avg_reward = log_running_reward / log_running_episodes
+                    log_avg_reward = round(log_avg_reward, 4)
+
+                    log_running_reward = 0
+                    log_running_episodes = 1
+
+                # printing average reward
+                if time_step % 2000 == 0:
+
+                    # print average reward till last episode
+                    print_avg_reward = print_running_reward / (print_running_episodes)
+                    print_avg_reward = round(print_avg_reward, 2)
+
+                    print("Episode : {} \t\t Timestep : {} \t\t Average Reward : {}".format(i_episode, time_step, print_avg_reward))
+
+                    print_running_reward = 0
+                    print_running_episodes = 1
+     
+                if done:
+                    break
+
+            print_running_reward += current_ep_reward
+            print_running_episodes += 1
+
+            log_running_reward += current_ep_reward
+            log_running_episodes += 1
+
+            i_episode += 1
+
+
 if __name__ == "__main__":
     
 

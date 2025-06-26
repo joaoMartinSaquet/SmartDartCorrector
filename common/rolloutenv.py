@@ -217,6 +217,9 @@ def action_to_msg(displacement, click, num_envs = 1):
     return action
 
 
+def normalize(x):
+    return (x + MAX_DISP)/(2*MAX_DISP)
+
 if __name__ == "__main__":
     
     N = 1

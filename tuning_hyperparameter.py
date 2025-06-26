@@ -10,8 +10,8 @@ from plotly.io import show
 import matplotlib.pyplot as plt
 
 
-n_jobs = 10
-env = StableBaselinesGodotEnv(env_path="games/SmartDartEnvNormalized/smartDartEnv.x86_64", show_window=False, n_parallel=n_jobs)
+n_jobs = 1  
+env = StableBaselinesGodotEnv(env_path="games/SmartDartPlusDist/smartDartEnv.x86_64", show_window=False, n_parallel=n_jobs)
 envs = deque(env.envs, maxlen=env.num_envs) 
 def objective(trial):
     # Define hyperparameters
@@ -38,9 +38,50 @@ def objective(trial):
     envs.append(env)
     return reward
 
+
+def objectivePPO(trial):
+    # Define hyperparameters
+    lr_actor = trial.suggest_float("lr_actor", 1e-6, 1e-3, log=True)
+    lr_critic = trial.suggest_float("lr_critic", 1e-6, 1e-3, log=True)
+    hidden_size = trial.suggest_categorical("hidden_size", [64, 128, 256, 512])
+    gamma = trial.suggest_float("gamma", 0.95, 0.9999)
+    clip_epsilon = trial.suggest_float("clip_epsilon", 0.1, 0.3)
+    gae_lambda = trial.suggest_float("gae_lambda", 0.8, 0.99)
+    noptimsteps = trial.suggest_int("noptimsteps", 10, 100)
+    action_std = trial.suggest_float("action_std", 0.1, 0.5)
+    decay = trial.suggest_float("decay", 0.01, 0.1)
+    num_episodes = 10
+    perturbator = None
+
+    env = StableBaselinesGodotEnv(env_path="games/SmartDartPlusDist/smartDartEnv.x86_64", show_window=False, n_parallel=n_jobs)
+    u_sim = VITE_USim([0, 0])
+
+    # Initialize the corrector with the suggested hyperparameters
+    corr = PPOCorrector(
+        env=env,
+        u_sim=u_sim,
+        perturbator=perturbator,
+        hidden_size=hidden_size,
+        lr_actor=lr_actor,
+        lr_critic=lr_critic,
+        decay_action_std=decay,
+        action_std_init=action_std,
+        gamma=gamma,
+        noptimsteps=noptimsteps,
+        clip_epsilon=clip_epsilon,
+        gae_lambda=gae_lambda,
+        num_episodes=num_episodes,
+        policy_type="MLP"
+    )
+
+    # Run the training loop and get the final reward
+    reward_list, reward = corr.train(num_episodes)
+    # Return the final reward as the objective value
+    return reward
+
 logger.info("Start study")
 study = optuna.create_study(direction="maximize")
-study.optimize(objective, n_trials=100, n_jobs=n_jobs, show_progress_bar=True)
+study.optimize(objectivePPO, n_trials=5, n_jobs=n_jobs, show_progress_bar=True)
     
     
 pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])

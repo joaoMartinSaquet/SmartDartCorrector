@@ -2,6 +2,8 @@
 from torch import nn
 import torch
 
+from loguru import logger
+
 class REINFORCEnet(nn.Module):
     def __init__(self, n_input = 2, n_output = 2, layers = [16, 16]):
         super().__init__()
@@ -87,33 +89,59 @@ class DDPGCritic(nn.Module):
     
 
 class PPOActorCritic(nn.Module):
-    def __init__(self, input_dim, action_dim, hidden_dim):
+    def __init__(self, input_dim, action_dim, hidden_dim, action_std_init=0.1, device='cpu'):
         super(PPOActorCritic, self).__init__()
-
+        self.device = device    
+        self.action_dim = action_dim
+        self.action_var = torch.full((action_dim,), action_std_init * action_std_init).to(device)
+        # self.action_var = action_std_init
         # Shared layers
-        fa = nn.Tanh()
-        self.shared_net = nn.Sequential(
+        self.critic = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            fa,
+            nn.Tanh(),
             nn.Linear(hidden_dim, hidden_dim),
-            fa
-        )
-
-        # Actor's layers
-        self.actor_mean = nn.Linear(hidden_dim, action_dim)
-        self.actor_logstd = nn.Linear(hidden_dim, action_dim)
-
-        # Critic's layers
-        self.critic = nn.Linear(hidden_dim, 1)
+            nn.Tanh(),
+            nn.Linear(hidden_dim, 1),
+        ).to(device)
+        
+        self.actor = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, action_dim),
+            nn.Tanh(),
+        ).to(device)
 
     def forward(self, x):
-        shared_features = self.shared_net(x)
+        raise NotImplemented
+    
+    def act(self, state):
 
-        # Actor outputs
-        action_mean = self.actor_mean(shared_features)
-        action_logstd = self.actor_logstd(shared_features)
+        action_mean = self.actor(state)
+        cov_mat = torch.diag(self.action_var)
+        # logger.debug(f"state {state} action mean : {self.action_var}  cov mat : {cov_mat}")
+        dist = torch.distributions.MultivariateNormal(action_mean, cov_mat)
 
-        # Critic output
-        state_value = self.critic(shared_features)
+        action = dist.sample()
+        action_logprob = dist.log_prob(action.unsqueeze(0))
+        state_value = self.critic(state)
 
-        return action_mean, action_logstd, state_value
+        return action.detach(), action_logprob.detach(), state_value.detach()
+
+    def set_action_std(self, new_action_std):
+        self.action_var = torch.full((self.action_dim,), new_action_std * new_action_std).to(self.device)
+    
+    def evaluate(self, state, action):
+
+        action_mean = self.actor(state)
+        action_var = self.action_var.expand_as(action_mean)
+        cov_mat = torch.diag_embed(action_var).to(self.device)
+
+        dist = torch.distributions.MultivariateNormal(action_mean, cov_mat)
+        action_logprobs = dist.log_prob(action)
+        dist_entropy = dist.entropy()
+        state_value = self.critic(state)
+
+        return action_logprobs, state_value, dist_entropy
+
