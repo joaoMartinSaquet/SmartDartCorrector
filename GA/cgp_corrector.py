@@ -161,10 +161,11 @@ class CGPCorrector(Corrector):
         viz.draw_net(G, self.n_inputs, self.n_outputs)
         plt.savefig(LOG_PATH + "/graph.png")
 
-        print("fit history : ", fit_history)
-        print("best genome : ", self.best_genomes)
-        
-        to_dump = {"fit_history" : fit_history,
+        # logger.info("fit history : ", fit_history)
+        # print("best genome : ", self.best_genomes)
+        pr
+        to_dump = {"Mean fit history" : np.mean(fit_history),
+        "           best_fit_history" : fit_history,
                    "best_genome" : self.best_genomes}
         
         pd.DataFrame(to_dump).to_csv(LOG_PATH + "/log.csv")

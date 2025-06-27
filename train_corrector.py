@@ -111,7 +111,7 @@ if __name__ == "__main__":
             raise ValueError(f"Unknown method: {args.method}")
         
         # env = StableBaselinesGodotEnv( n_parallel=n_parallel)
-        env = StableBaselinesGodotEnv(env_path="games/SmartDartPlusDist/smartDartEnv.x86_64", show_window=False, n_parallel=n_parallel)
+        env = StableBaselinesGodotEnv(env_path="games/SmartDartSingleEnv/smartDartEnv.x86_64", show_window=False, n_parallel=n_parallel)
 
         # Initialize user simulator
         u_sim = VITE_USim([0, 0])
@@ -125,8 +125,10 @@ if __name__ == "__main__":
                 logger.info(f"Reinforcement Learning training : {i+1} / {Nruns}")
                 # corr = ReinforceCorrector(env, u_sim, perturbator, hidden_size=256, learning_rate=1e-4, learn=True, log=True, policy_type="StackedMLP")
                 # corr = PPOCorrector(env, u_sim, perturbator, hidden_size=128, actor_lr=0.000405, critic_lr=0.0001102, batch_size=1024, learn=True, log=True, policy_type="MLP")
-                corr = PPOCorrector(env, u_sim, perturbator, hidden_size=64, lr_actor=3e-4, lr_critic=1e-3, gamma=0.99, noptimsteps=40, clip_epsilon=0.2,  gae_lambda=0.80, log=True, policy_type="MLP")
-                # corr = PPOCorrector(env, u_sim, perturbator, hidden_size=64, learning_rate=1e-4, batch_size=1024, gamma=0.99, noptimsteps=10, clip_epsilon=0.11,  gae_lambda=0.80, learn=True, log=True, policy_type="MLP")
+                # corr = PPOCorrector(env, u_sim, perturbator, hidden_size=64, lr_actor=3e-4, lr_critic=1e-3, gamma=0.99, noptimsteps=40, clip_epsilon=0.2,  gae_lambda=0.80, log=True, policy_type="MLP")
+                corr = PPOCorrector(env, u_sim, perturbator, hidden_size=64, learning_rate=1e-4, batch_size=1024, gamma=0.99, k_epochs=10, clip_epsilon=0.11,  gae_lambda=0.80, learn=True, log=True, policy_type="MLP")
+                # corr = PPOSB3Corrector(env, u_sim, perturbator, log = True)
+                
                 reward_list, final_reward = corr.train(n_episodes)
                 reward_runs.append(final_reward)
                 reward_lists.append(reward_list)
@@ -141,7 +143,7 @@ if __name__ == "__main__":
                 reward_df.to_csv(file_name)
                 
             elif args.method == 'cgp':
-                ngen = 50
+                ngen = 10
                 print("Starting Cartesian Genetic Programming training...")
                 corr = CGPCorrector(env, ngen, MAXSTEPS, 20, 1, perturbator)
                 fit_history = corr.learn(8, 96, random_genomes=True)

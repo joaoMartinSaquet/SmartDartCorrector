@@ -47,9 +47,12 @@ def objectivePPO(trial):
     gamma = trial.suggest_float("gamma", 0.95, 0.9999)
     clip_epsilon = trial.suggest_float("clip_epsilon", 0.1, 0.3)
     gae_lambda = trial.suggest_float("gae_lambda", 0.8, 0.99)
-    noptimsteps = trial.suggest_int("noptimsteps", 10, 100)
+    K_epochs = trial.suggest_int("K_epochs", 10, 100)
     action_std = trial.suggest_float("action_std", 0.1, 0.5)
     decay = trial.suggest_float("decay", 0.01, 0.1)
+    vf_loss_coef = trial.suggest_float("vf_loss_coef", 0.1, 1.0)
+
+    min_action_std = trial.suggest_float("min_action_std", 0.1, 0.5)
     num_episodes = 10
     perturbator = None
 
@@ -67,9 +70,11 @@ def objectivePPO(trial):
         decay_action_std=decay,
         action_std_init=action_std,
         gamma=gamma,
-        noptimsteps=noptimsteps,
+        k_epochs=noptimsteps,
         clip_epsilon=clip_epsilon,
         gae_lambda=gae_lambda,
+        vf_loss_coef=vf_loss_coef,
+        min_action_std=min_action_std,
         num_episodes=num_episodes,
         policy_type="MLP"
     )

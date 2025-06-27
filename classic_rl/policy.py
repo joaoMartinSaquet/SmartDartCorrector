@@ -98,9 +98,9 @@ class PPOActorCritic(nn.Module):
         # Shared layers
         self.critic = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, 1),
         ).to(device)
         
@@ -117,16 +117,14 @@ class PPOActorCritic(nn.Module):
         raise NotImplemented
     
     def act(self, state):
-
         action_mean = self.actor(state)
-        cov_mat = torch.diag(self.action_var)
+        cov_mat = torch.diag(self.action_var).unsqueeze(0)
         # logger.debug(f"state {state} action mean : {self.action_var}  cov mat : {cov_mat}")
         dist = torch.distributions.MultivariateNormal(action_mean, cov_mat)
 
         action = dist.sample()
-        action_logprob = dist.log_prob(action.unsqueeze(0))
+        action_logprob = dist.log_prob(action)
         state_value = self.critic(state)
-
         return action.detach(), action_logprob.detach(), state_value.detach()
 
     def set_action_std(self, new_action_std):

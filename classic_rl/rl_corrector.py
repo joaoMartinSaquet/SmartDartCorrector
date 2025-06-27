@@ -20,6 +20,14 @@ from common.perturbation import *
 from common.rolloutenv import *
 from common.corrector import *
 
+
+from classic_rl.PPO import *
+
+
+
+import stable_baselines3 as sb3
+
+
 # steps where we say, that's enough reset yourselves
 MAXSTEPS =int(1e6)
 
@@ -648,7 +656,7 @@ class DDPGCorrector(Corrector):
             self.epsilon = max(0, self.epsilon)
 
 class PPOCorrector:
-    def __init__(self, env, u_sim, perturbator=None, log=False, policy_type="MLP", hidden_size=512, lr_actor=1e-3, lr_critic = 1e-3, gamma=0.99, noptimsteps=7, clip_epsilon=0.2, gae_lambda=0.95, batch_size=64, vf_loss_coef=0.5,
+    def __init__(self, env, u_sim, perturbator=None, log=False, policy_type="MLP", lr_actor=3e-4, lr_critic = 1e-3, gamma=0.99, k_epochs=80, clip_epsilon=0.2, gae_lambda=1, hidden_size=64, vf_loss_coef=0.5,
                  action_std_init = 0.6, decay_action_std = 0.05, min_action_std = 0.1, num_episodes=10):
         super().__init__()
         self.log = log
@@ -657,9 +665,8 @@ class PPOCorrector:
         self.gamma = gamma
         self.clip_epsilon = clip_epsilon
         self.gae_lambda = gae_lambda
-        self.batch_size = batch_size
         self.num_episodes = num_episodes
-        self.noptimsteps = noptimsteps
+        self.k_epochs = k_epochs
         self.vf_loss_coef = vf_loss_coef
         
         self.action_std = action_std_init
@@ -695,8 +702,8 @@ class PPOCorrector:
         self.replay_buffer = PPOReplayBuffer()
         self.sb = isinstance(self.env, StableBaselinesGodotEnv)
 
-        self.max_ep_len = 5000
-        self.update_freq = self.max_ep_len * 0.2
+        self.max_ep_len = 1000
+        self.update_freq = self.max_ep_len * 4
         self.max_timesteps = 1e6
     
     def set_action_std(self, new_action_std):
@@ -711,15 +718,15 @@ class PPOCorrector:
         self.set_action_std(self.action_std)
 
     def select_action(self, state):
+        with torch.no_grad():
+            state_tensor = torch.tensor(state).to(torch.float).to(self.device)
+            action_mean, action_logprob, state_value = self.old_policy.act(state_tensor)
 
-        state_tensor = torch.tensor(state).to(torch.float).to(self.device)
-        action_mean, action_logprob, state_value = self.old_policy.act(state_tensor)
-
-        self.replay_buffer.states.append(state_tensor)
-        self.replay_buffer.actions.append(action_mean)
-        self.replay_buffer.log_probs.append(action_logprob)
-        self.replay_buffer.values.append(state_value)
-        # logger.debug(f"action log prob : {log_prob}")
+            self.replay_buffer.states.append(state_tensor)
+            self.replay_buffer.actions.append(action_mean)
+            self.replay_buffer.log_probs.append(action_logprob)
+            self.replay_buffer.values.append(state_value)
+            # logger.debug(f"action log prob : {log_prob}")
         return action_mean.cpu().numpy().flatten()
 
     
@@ -762,15 +769,14 @@ class PPOCorrector:
         dones = torch.tensor(np.array(self.replay_buffer.dones)).to(torch.float).to(self.device)
         
         advantages = self.compute_gae(rewards, old_values, dones)
-        # returns  = self.computre_return(rewards, dones)
-        # torch.tensor(advantages).to(self.device)
+
 
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         criterion = nn.MSELoss()
 
 
-        for _ in range(self.noptimsteps):
+        for _ in range(self.k_epochs):
             
             logprobs, values, dist_entropy = self.policy.evaluate(old_states, old_actions)
 
@@ -782,9 +788,8 @@ class PPOCorrector:
             surr1 = ratio * advantages
             surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * advantages
             # final loss
-
             actor_loss = -torch.min(surr1, surr2) # weird one
-            critic_loss = criterion(values, rewards) 
+            critic_loss = criterion(values.squeeze(), rewards) 
             
 
             loss = actor_loss + self.vf_loss_coef * critic_loss - 0.01 * dist_entropy
@@ -882,6 +887,7 @@ class PPOCorrector:
 
     def train_claissic_env(self, env, n_episodes):
         # printing and logging variables
+        r_list = []
         print_running_reward = 0
         print_running_episodes = 1
 
@@ -891,12 +897,11 @@ class PPOCorrector:
         time_step = 0
         i_episode = 0
         max_ep_len = 1000
-        max_training_timesteps = 1e5
+        max_training_timesteps = 3e6
         # training loop
         while time_step <= max_training_timesteps:
             
             state, _ = env.reset()
-            print("state = ", state)
             current_ep_reward = 0
 
             for t in range(1, max_ep_len+1):
@@ -917,8 +922,9 @@ class PPOCorrector:
                     self.ppo_update()
 
                 # if continuous action space; then decay action std of ouput action distribution
-
-                self.decay_action_std()
+                if time_step % int(2e5) == 0:
+                    print("iam decaying action std ! ")
+                    self.decay_action_std()
 
                 # log in logging file
                 if time_step % max_ep_len * 2 == 0:
@@ -926,9 +932,10 @@ class PPOCorrector:
                     # log average reward till last episode
                     log_avg_reward = log_running_reward / log_running_episodes
                     log_avg_reward = round(log_avg_reward, 4)
-
+                    r_list.append(log_avg_reward)
                     log_running_reward = 0
                     log_running_episodes = 1
+
 
                 # printing average reward
                 if time_step % 2000 == 0:
@@ -953,27 +960,171 @@ class PPOCorrector:
 
             i_episode += 1
 
+        return r_list
+    
+
+
+
+class PPOSB3Corrector(Corrector):
+
+    def __init__(self, env, u_sim, perturbator=None, log=False, policy_type="MLP", lr_actor=3e-4, lr_critic = 1e-3, gamma=0.99, k_epochs=80, clip_epsilon=0.2, gae_lambda=1, hidden_size=64, vf_loss_coef=0.5,
+                 action_std_init = 0.6, decay_action_std = 0.05, min_action_std = 0.1, num_episodes=10):
+        super().__init__()
+
+        self.gamma = gamma
+        self.clip_epsilon = clip_epsilon
+        self.gae_lambda = gae_lambda
+        self.num_episodes = num_episodes
+        self.k_epochs = k_epochs
+        self.vf_loss_coef = vf_loss_coef
+        
+        self.action_std = action_std_init
+        self.decay_action_std_rate = decay_action_std
+        self.min_action_std = min_action_std
+        
+        self.max_training_timesteps = 3e6
+        self.max_ep_len = 1000
+
+        self.update_timestep = self.max_ep_len * 4
+        self.action_std_decay_freq = int(2.5e5)
+
+        logger.info(f"gamma {gamma}, clip_epsilon {clip_epsilon}, gae_lambda {gae_lambda}, num_episodes {num_episodes}, k_epochs {k_epochs}, vf_loss_coef {vf_loss_coef}, action_std {action_std_init}, decay_action_std_rate {decay_action_std}, min_action_std {min_action_std}")
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.action_dim = 2
+        input_dim = 2
+        has_continuous_action_space = True
+
+
+        self.ppo_agent = PPO(input_dim, self.action_dim, lr_actor, lr_critic, gamma, k_epochs, clip_epsilon, has_continuous_action_space, action_std_init)
+        
+        # self.rollout_buffer = RolloutBuffer()
+
+        self.env  = env
+
+
+
+    def train(self, n_episodes):
+        
+        log = {
+            "reward" : [],
+            "episode" : [],
+            "timestep" : []}
+
+
+        
+        print_freq = self.max_ep_len * 10        # print avg reward in the interval (in num timesteps)
+        log_freq = self.max_ep_len * 2           # log avg reward in the interval (in num timesteps)
+        save_model_freq = int(1e5)    
+        
+
+        # printing and logging variables
+        print_running_reward = 0
+        print_running_episodes = 0
+
+        log_running_reward = 0
+        log_running_episodes = 0
+
+        time_step = 0
+        i_episode = 0
+
+
+        # training loop
+        while time_step <= self.max_training_timesteps:
+
+            state, _ = self.env.reset()
+            state = state.reshape(1, -1)
+            current_ep_reward = 0
+            # print(state)            current_ep_reward = 0
+
+            for t in range(1, self.max_ep_len+1):
+
+                action = self.ppo_agent.select_action(state)
+                nextstate, reward, done, _, _ = self.env.step(action)
+
+                # saving reward and is_terminals
+                self.ppo_agent.buffer.rewards.append(reward)
+                self.ppo_agent.buffer.is_terminals.append(done)
+
+                time_step +=1
+                current_ep_reward += reward
+
+                # update PPO agent
+                if time_step % self.update_timestep == 0:
+                    self.ppo_agent.update()
+
+                # if continuous action space; then decay action std of ouput action distribution
+                if time_step % self.action_std_decay_freq == 0:
+                    self.ppo_agent.decay_action_std(self.decay_action_std_rate, self.min_action_std)
+
+                # log in logging file
+                if time_step % log_freq == 0:
+
+                    # log average reward till last episode
+                    log_avg_reward = log_running_reward / log_running_episodes
+                    log_avg_reward = round(log_avg_reward, 4)
+                    log["reward"].append(log_avg_reward)
+                    log["episode"].append(i_episode)
+                    log["timestep"].append(time_step)
+                    log_running_reward = 0
+                    log_running_episodes = 0
+
+                # printing average reward
+                if time_step % print_freq == 0:
+
+                    # print average reward till last episode
+                    print_avg_reward = print_running_reward / print_running_episodes
+                    print_avg_reward = round(print_avg_reward, 2)
+
+                    logger.info("Episode : {} \t Timestep : {} \t Average Reward : {}".format(i_episode, time_step, print_avg_reward))
+
+                    print_running_reward = 0
+                    print_running_episodes = 0
+
+                state = nextstate.reshape(1, -1)
+
+                if done:
+                    break
+
+            print_running_reward += current_ep_reward
+            print_running_episodes += 1
+
+            log_running_reward += current_ep_reward
+            log_running_episodes += 1
+
+            i_episode += 1
+
+        return log
+
 
 if __name__ == "__main__":
     
 
-        # create a perturbation
-    perturbator = NormalJittering(0, 20)
-    # perturbator = None
+    #     # create a perturbation
+    # perturbator = NormalJittering(0, 20)
+    # # perturbator = None
 
 
-    # create a corrector
-    corrector = None
-    # corrector = LowPassCorrector(5)
+    # # create a corrector
+    # corrector = None
+    # # corrector = LowPassCorrector(5)
 
-    # Initialize the environment
-    env = GodotEnv(convert_action_space=True)
+    # # Initialize the environment
+    # env = GodotEnv(convert_action_space=True)
     
     
-    u_sim = VITE_USim([0, 0])
+    # u_sim = VITE_USim([0, 0])
 
-    corr = ReinforceCorrector(env, u_sim, perturbator, learn = True, log = True)
-    # corr.training_loop(Corrector)
-    corr.training_loop()
+    # corr = ReinforceCorrector(env, u_sim, perturbator, learn = True, log = True)
+    # # corr.training_loop(Corrector)
+    # corr.training_loop()
 
-    env.close()
+    # env.close()
+    import gymnasium as gym
+
+
+    env = gym.make("MountainCarContinuous-v0")  # default goal_velocity=0
+
+    corrector = PPOSB3Corrector(env, None) 
+    rlist  = corrector.train(10)
+
