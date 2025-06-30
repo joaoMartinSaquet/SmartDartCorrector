@@ -163,12 +163,11 @@ class CGPCorrector(Corrector):
 
         # logger.info("fit history : ", fit_history)
         # print("best genome : ", self.best_genomes)
-        pr
         to_dump = {"Mean fit history" : np.mean(fit_history),
         "           best_fit_history" : fit_history,
                    "best_genome" : self.best_genomes}
         
         pd.DataFrame(to_dump).to_csv(LOG_PATH + "/log.csv")
         
-        return fit_history
+        return to_dump
 

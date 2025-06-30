@@ -1,6 +1,7 @@
 from godot_rl.core.godot_env import GodotEnv
 from godot_rl.wrappers.stable_baselines_wrapper import StableBaselinesGodotEnv 
 from gymnasium import spaces
+import gymnasium as gym
 import numpy as np
 import tqdm
 from loguru import logger
@@ -11,6 +12,8 @@ from common.perturbation import *
 
 
 MAX_DISP = 40
+# GAME_PATH = "games/SmartDartSingleEnv/smartDartEnv.x86_64"
+GAME_PATH = "games/SmartDartPlusDist/smartDartEnv.x86_64"
 
 class Buffer:
     """Inpired from stable_baselines3
@@ -209,7 +212,7 @@ def rolloutMultiSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = N
 
 def action_to_msg(displacement, click, num_envs = 1):
     if torch.is_tensor(displacement):
-        displacement = displacement.to("cpu").detach().numpy()
+        displacement = displacement.numpy()
 
     displacement = np.clip(displacement, -MAX_DISP, MAX_DISP),
     action = np.insert(displacement, 0 , click)
@@ -259,3 +262,39 @@ def read_obs(obs, sb_env : bool):
         obs = np.array(obs[0]["obs"])
 
     return obs
+
+
+class smartDartEnv(gym.Env):
+    # metadata = {'render.modes': ['human']}
+    def __init__(self, usim, perturbator=None, render = False, n_parallel=1):
+        super(smartDartEnv, self).__init__()
+        self.action_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=(2,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=(2,), dtype=np.float32)
+        self.godot_env = StableBaselinesGodotEnv(GAME_PATH, num_envs=n_parallel, show_window=render)
+        self.sb = isinstance(self.godot_env, StableBaselinesGodotEnv)
+        
+        self.usim = usim
+        self.perturbator = perturbator
+
+    def reset(self):
+        game_obs = self.godot_env.reset()
+        game_obs = obs_handling(game_obs, self.sb)[0]
+        user_state_initial = np.array(game_obs[2:]) 
+
+        self.usim.reset(user_state_initial)
+        move_action, self.click =self.usim.step(game_obs[0:2], game_obs[2:], self.perturbator)
+        return move_action, None
+    
+    def step(self, action):
+        move_action = action
+        game_obs, reward, done, info = self.godot_env.step(action_to_msg(move_action, self.click))
+        game_obs = obs_handling(game_obs, self.sb)[0]
+
+
+        action, self.click = self.usim.step(game_obs[:2], game_obs[2:], self.perturbator)
+
+        
+        return action, reward[0], done, info, None
+
+    def render(self):
+        pass

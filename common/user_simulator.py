@@ -112,4 +112,5 @@ class VITE_USim(UserSimulator):
         if pertubator is not None:
             displacement = pertubator(displacement)
 
+        
         return displacement, click
