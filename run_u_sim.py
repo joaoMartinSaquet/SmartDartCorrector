@@ -18,7 +18,7 @@ if __name__ == "__main__":
                        help='bias ')
     
 
-    env_path = "games/SmartDartSingleEnv/smartDartEnv.x86_64"
+    env_path = GAME_PATH
     args = parser.parse_args()
     N = args.N
     # create a perturbation
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     
     # Initialize the environment
     # env = GodotEnv(convert_action_space=True)
-    env = StableBaselinesGodotEnv(env_path=env_path, n_parallel=6)
+    env = StableBaselinesGodotEnv(env_path=env_path, n_parallel=1)
 
     print("env created")
     print("env number is : ", env.num_envs)

@@ -12,8 +12,8 @@ from common.perturbation import *
 
 
 MAX_DISP = 40
-# GAME_PATH = "games/SmartDartSingleEnv/smartDartEnv.x86_64"
-GAME_PATH = "games/SmartDartPlusDist/smartDartEnv.x86_64"
+GAME_PATH = "games/SmartDartEnvNormalized/smartDartEnv.x86_64"
+# GAME_PATH = "games/SmartDartPlusDist/smartDartEnv.x86_64"
 
 class Buffer:
     """Inpired from stable_baselines3
@@ -75,9 +75,15 @@ def stepSmartDartEnv(env, obs, u_simulator : UserSimulator, perturbator : Pertur
 def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, seed = 0, log = 0):
 
     num_envs = env.num_envs
+    sb = isinstance(env, StableBaselinesGodotEnv)
 
-    observation, info = env.reset()
-    xinit = np.array(observation[0]["obs"][2:])
+    if sb:
+        observation = env.reset()
+    else:
+        observation, _ = env.reset(seed=seed)
+    
+    obs = obs_handling(observation, sb)[0]
+    xinit = np.array(obs[2:])
     
     u_simulator = VITE_USim(xinit)
     
@@ -86,7 +92,6 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
     # rolling out env
     for i in range(Nstep):
         # get controller actions and process it (clamp, norm, pert, etc...)
-        obs = np.array(observation[0]["obs"])
         move_action, click_action = u_simulator.compute_displacement(obs[:2], obs[2:])
 
         # convert moveaction to numpy
@@ -117,8 +122,12 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
         if log > 3:
             logger.debug("RolloutSmartDartEnv  action sended at step {i}, action = {action}".format(i = i, action = action))
         
-        observation, reward, done, info, _ = env.step(action)
+        if sb:
+            observation, reward, done, info = env.step(action)
+        else:
+            observation, reward, done, info, _ = env.step(action)
 
+        obs = obs_handling(observation, sb)[0]
         # update reward list
         reward_list.append(reward)
 

@@ -63,11 +63,9 @@ if __name__ == "__main__":
         perturbator = None
 
         env = smartDartEnv(u_sim, perturbator, render = False, n_parallel=1)
-
-        # corrector = PPOCorrector(env, u_sim, perturbator, hidden_size=64, lr_actor=3e-4, lr_critic=1e-3, gamma=0.99, k_epochs=80, clip_epsilon=0.2, gae_lambda=1, action_std_init = 0.6, decay_action_std = 0.05, min_action_std = 0.1, max_training_timesteps = 3e6, max_ep_len = 1000, update_factor = 2)
-        
-        corrector = PPOCorrector(env, u_sim, perturbator, hidden_size=64, lr_actor=3e-4, lr_critic=1e-3, gamma=0.99, k_epochs=80, clip_epsilon=0.2, gae_lambda=1, action_std_init = 0.6, decay_action_std = 0.05, min_action_std = 0.01, max_training_timesteps = 3e6, max_ep_len = 1000, update_factor = 4)
-
+        # working one (need to be tuned)
+        # corrector = PPOCorrector(env, u_sim, perturbator, hidden_size=64, lr_actor=3e-4, lr_critic=1e-3, gamma=0.99, k_epochs=80, clip_epsilon=0.2, gae_lambda=1, action_std_init = 0.6, decay_action_std = 0.05, min_action_std = 0.01, max_training_timesteps = 3e6, max_ep_len = 1000, update_factor = 4)
+        corrector = PPOCorrector(env, u_sim, perturbator, hidden_size=64, lr_actor=3e-4, lr_critic=1e-3, gamma=0.99, k_epochs=80, clip_epsilon=0.2, gae_lambda=1, action_std_init = 0.6, decay_action_std = 0.05, min_action_std = 0.01, max_training_timesteps = 2.5e6, max_ep_len = 1000, update_factor = 4)
         log = corrector.train()
 
 

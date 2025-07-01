@@ -361,7 +361,7 @@ class PPOCorrector(Corrector):
         self.decay_action_std_rate = decay_action_std
         self.min_action_std = min_action_std
         
-        self.max_training_timesteps = max_training_timesteps
+        self.max_training_timesteps = int(max_training_timesteps)
         self.max_ep_len = max_ep_len
 
         self.update_timestep = update_factor * self.max_ep_len
