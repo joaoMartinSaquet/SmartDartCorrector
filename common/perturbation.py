@@ -17,6 +17,7 @@ class NormalJittering(Perturbator):
         super().__init__(name=name)
         self.bias = bias
         self.standard_deviation = standard_deviation
+        
 
     def __call__(self, input):
         return input + np.random.normal(self.bias, self.standard_deviation , input.shape)

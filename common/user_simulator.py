@@ -108,7 +108,8 @@ class VITE_USim(UserSimulator):
     def step(self, y_target, y_process, pertubator):
         
         displacement, click = self.compute_displacement(y_target, y_process)
-
+        
+        displacement = np.array(displacement)
         if pertubator is not None:
             displacement = pertubator(displacement)
 

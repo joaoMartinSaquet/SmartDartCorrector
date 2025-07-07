@@ -307,3 +307,10 @@ class smartDartEnv(gym.Env):
 
     def render(self):
         pass
+    
+
+    def set_usim(self, usim):
+        self.usim = usim
+
+    def set_perturbator(self, perturbator):
+        self.perturbator = perturbator

@@ -40,14 +40,14 @@ class inputBuffer(deque):
         self.clear()
         
         for _ in range(self.maxlen):
-            self.append(torch.zeros(self.input_dim))
+            self.append(np.zeros(self.input_dim))
 
-    def add(self, input):
-        self.append(input)
+    def add(self, inData):
+        self.append(inData)
 
 
     def get(self):
-        return torch.stack(list(self))
+        return np.array(self).flatten()
 
 
 def normalize(x):
@@ -342,7 +342,7 @@ class ReinforceCorrector(Corrector):
 class PPOCorrector(Corrector):
 
     def __init__(self, env, u_sim, perturbator=None, log=False, policy_type="MLP", lr_actor=3e-4, lr_critic = 1e-3, gamma=0.99, k_epochs=80, clip_epsilon=0.2, gae_lambda=1, hidden_size=64, vf_loss_coef=0.5,
-                 action_std_init = 0.6, decay_action_std = 0.05, min_action_std = 0.1, max_training_timesteps = 1e6, max_ep_len = 1000, update_factor = 4):
+                 action_std_init = 0.6, decay_action_std = 0.05, min_action_std = 0.1, max_training_timesteps = 3e6, max_ep_len = 1000, update_factor = 4, policy = "MLP", seq_length = 10):
         super().__init__()
 
         
@@ -371,17 +371,29 @@ class PPOCorrector(Corrector):
         logger.info(f"gamma {gamma}, clip_epsilon {clip_epsilon}, gae_lambda {gae_lambda}, lr_actor {lr_actor}, lr_critic {lr_critic}, k_epochs {k_epochs}, vf_loss_coef {vf_loss_coef}, action_std {action_std_init}, decay_action_std_rate {decay_action_std}, min_action_std {min_action_std}")
         logger.info(f"max_training_timesteps {max_training_timesteps}, max_ep_len {max_ep_len}, update_factor {update_factor} action_std_decay_freq {self.action_std_decay_freq}")
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.action_dim = env.action_space.shape[0]
-        input_dim = env.observation_space.shape[0]
-        has_continuous_action_space = True
 
+        has_continuous_action_space = True
+        self.action_dim = env.action_space.shape[0] 
+        state_dim = env.observation_space.shape[0]
+        if policy_type == "MLP":
+            input_dim = state_dim
+            self.input_buffer = None
+        else :
+            input_dim = state_dim * seq_length
+            self.input_buffer = inputBuffer(state_dim, seq_length)
+            for i in range(seq_length):
+                self.input_buffer.add(np.zeros(state_dim))
 
         self.ppo_agent = PPO(input_dim, self.action_dim, lr_actor, lr_critic, gamma, k_epochs, clip_epsilon, has_continuous_action_space, action_std_init)
         
         # self.rollout_buffer = RolloutBuffer()
 
         self.env  = env
-        self.log_dir = "logs_corrector/PPO_" + time.strftime("%Y%m%d-%H%M%S") + "/"
+        if perturbator is not None:
+            pert_prefix = perturbator.__class__.__name__
+        else :
+            pert_prefix = ""
+        self.log_dir = "logs_corrector/PPO" + pert_prefix + "_" + time.strftime("%Y%m%d-%H%M%S") + "/"
 
 
     def train(self):
@@ -412,11 +424,18 @@ class PPOCorrector(Corrector):
         while time_step <= self.max_training_timesteps:
 
             state, _ = self.env.reset()
-            
+            if self.input_buffer is not None:
+                self.input_buffer.reset()
+                
             # state = np.array(state).reshape(1, -1)
             state = np.array(state)
             current_ep_reward = 0
             for t in range(1, self.max_ep_len+1):
+
+                if self.input_buffer is not None:
+                    self.input_buffer.add(state)
+                    state = self.input_buffer.get()
+                    
                 action = self.ppo_agent.select_action(state) * MAX_DISP 
                 nextstate, reward, done, _, _ = self.env.step(action)
 
