@@ -5,6 +5,7 @@ import gymnasium as gym
 import numpy as np
 import tqdm
 from loguru import logger
+from collections import deque
 import torch
 
 from common.user_simulator import *
@@ -275,13 +276,16 @@ def read_obs(obs, sb_env : bool):
 
 class smartDartEnv(gym.Env):
     # metadata = {'render.modes': ['human']}
-    def __init__(self, usim, perturbator=None, render = False, n_parallel=1):
+    def __init__(self, usim, perturbator=None, render = False, n_stack : int = 1, n_parallel=1):
         super(smartDartEnv, self).__init__()
-        self.action_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=(2,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=(2,), dtype=np.float32)
+        base_obs_shape  = tuple(map(lambda x: x * n_stack, (2, )))
+        self.action_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=base_obs_shape , dtype=np.float32)
+        self.observation_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=base_obs_shape, dtype=np.float32)
         self.godot_env = StableBaselinesGodotEnv(GAME_PATH, num_envs=n_parallel, show_window=render)
         self.sb = isinstance(self.godot_env, StableBaselinesGodotEnv)
-        
+
+
+        self.observations = deque(maxlen=n_stack)
         self.usim = usim
         self.perturbator = perturbator
 
@@ -292,7 +296,13 @@ class smartDartEnv(gym.Env):
 
         self.usim.reset(user_state_initial)
         move_action, self.click =self.usim.step(game_obs[0:2], game_obs[2:], self.perturbator)
-        return move_action, None
+
+        self.observations.clear()
+        for _ in range(len(self.observations)):
+            self.observations.append(np.zeros(move_action.shape))
+        self.observations.append(move_action)
+        obs = self.get_obs()
+        return obs, None
     
     def step(self, action):
         move_action = action
@@ -302,8 +312,10 @@ class smartDartEnv(gym.Env):
 
         action, self.click = self.usim.step(game_obs[:2], game_obs[2:], self.perturbator)
 
-        
-        return action, reward[0], done, info, None
+        self.observations.append(action)
+        obs = self.get_obs()
+
+        return obs, reward[0], done, info, None
 
     def render(self):
         pass
@@ -314,3 +326,7 @@ class smartDartEnv(gym.Env):
 
     def set_perturbator(self, perturbator):
         self.perturbator = perturbator
+
+
+    def get_obs(self):
+        return np.concatenate(self.observations)
