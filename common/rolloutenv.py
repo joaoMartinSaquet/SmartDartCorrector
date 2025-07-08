@@ -289,7 +289,11 @@ class smartDartEnv(gym.Env):
         self.usim = usim
         self.perturbator = perturbator
 
-    def reset(self):
+
+        self.info = {"episode" : 0}
+        # self.click = 0
+
+    def reset(self, seed=None):
         game_obs = self.godot_env.reset()
         game_obs = obs_handling(game_obs, self.sb)[0]
         user_state_initial = np.array(game_obs[2:]) 
@@ -302,20 +306,24 @@ class smartDartEnv(gym.Env):
             self.observations.append(np.zeros(move_action.shape))
         self.observations.append(move_action)
         obs = self.get_obs()
-        return obs, None
+        self.ts = 0
+        self.reward = 0
+        # self.info["episode"] = 0
+        return obs, {}
     
     def step(self, action):
         move_action = action
         game_obs, reward, done, info = self.godot_env.step(action_to_msg(move_action, self.click))
         game_obs = obs_handling(game_obs, self.sb)[0]
-
-
+        self.reward += reward
         action, self.click = self.usim.step(game_obs[:2], game_obs[2:], self.perturbator)
-
         self.observations.append(action)
         obs = self.get_obs()
-
-        return obs, reward[0], done, info, None
+        info = {}
+        if done:
+            info["episode"] = {"r": self.reward, "l": self.ts}
+        self.ts += 1
+        return obs, reward[0], done, False, info
 
     def render(self):
         pass
