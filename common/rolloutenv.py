@@ -276,7 +276,7 @@ def read_obs(obs, sb_env : bool):
 
 class smartDartEnv(gym.Env):
     # metadata = {'render.modes': ['human']}
-    def __init__(self, usim, perturbator=None, render = False, n_stack : int = 1, n_parallel=1):
+    def __init__(self, usim, perturbator=None, render = False, n_stack : int = 1, n_parallel=1, normalize: bool =False):
         super(smartDartEnv, self).__init__()
         base_obs_shape  = tuple(map(lambda x: x * n_stack, (2, )))
         self.action_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=base_obs_shape , dtype=np.float32)
@@ -288,7 +288,7 @@ class smartDartEnv(gym.Env):
         self.observations = deque(maxlen=n_stack)
         self.usim = usim
         self.perturbator = perturbator
-
+        self.normalize = normalize
 
         self.info = {"episode" : 0}
         # self.click = 0
@@ -301,6 +301,8 @@ class smartDartEnv(gym.Env):
         self.usim.reset(user_state_initial)
         move_action, self.click =self.usim.step(game_obs[0:2], game_obs[2:], self.perturbator)
 
+        if self.normalize:
+            move_action = move_action / MAX_DISP
         self.observations.clear()
         for _ in range(len(self.observations)):
             self.observations.append(np.zeros(move_action.shape))
@@ -311,13 +313,16 @@ class smartDartEnv(gym.Env):
         # self.info["episode"] = 0
         return obs, {}
     
-    def step(self, action):
-        move_action = action
+    def step(self, move_action):
+        move_action = move_action
         game_obs, reward, done, info = self.godot_env.step(action_to_msg(move_action, self.click))
         game_obs = obs_handling(game_obs, self.sb)[0]
         self.reward += reward
-        action, self.click = self.usim.step(game_obs[:2], game_obs[2:], self.perturbator)
-        self.observations.append(action)
+        move_action, self.click = self.usim.step(game_obs[:2], game_obs[2:], self.perturbator)
+
+        if self.normalize:
+            move_action = move_action / MAX_DISP
+        self.observations.append(move_action)
         obs = self.get_obs()
         info = {}
         if done:
