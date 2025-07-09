@@ -16,3 +16,8 @@ This repository contains:
 - User behavior simulation
 - Performance analysis tools
 - Training logs and saved models
+
+
+### Referecenses 
+ - PPO algorithm is taken from : https://github.com/nikhilbarhate99/PPO-PyTorch
+ - SAC is taken from sb3 

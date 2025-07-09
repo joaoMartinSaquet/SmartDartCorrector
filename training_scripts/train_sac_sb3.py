@@ -49,10 +49,10 @@ from common.rolloutenv import smartDartEnv, VITE_USim  # noqa: E402  (after sys.
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_smartdart_env(render: bool = False, perturbator: Any | None = None, nstack: int = 1):
+def make_smartdart_env(render: bool = False, perturbator: Any | None = None, nstack: int = 1, normalize: bool = False):
     """Factory for a fresh SmartDartEnv wrapped with Monitor."""
     u_sim = VITE_USim([0, 0])
-    env = smartDartEnv(u_sim, perturbator, render=render, n_parallel=1, n_stack=nstack)
+    env = smartDartEnv(u_sim, perturbator, render=render, n_parallel=1, n_stack=nstack, normalize=normalize)
     return Monitor(env)
 
 
@@ -89,11 +89,9 @@ def sample_sac_params(trial: optuna.Trial) -> Dict[str, Any]:
 # Main training / tuning routines
 # ---------------------------------------------------------------------------
 
-def make_vec_envs(n_envs: int, render: bool, normalize: bool):
-    env_fn = partial(make_smartdart_env, render=render)
+def make_vec_envs(n_envs: int, render: bool, normalize: bool, nstack: int = 1):
+    env_fn = partial(make_smartdart_env, render=render, nstack=nstack, normalize=normalize)
     venv = DummyVecEnv([env_fn for _ in range(n_envs)])
-    if normalize:
-        venv = VecNormalize(venv, norm_obs=True, norm_reward=False)
     return venv
 
 
@@ -106,7 +104,6 @@ def train_once(args: argparse.Namespace, **model_kwargs) -> tuple[SAC, float]:
         policy=args.policy,
         env=vec_env,
         learning_starts=args.learning_starts,
-        policy_kwargs=args.policy_kwargs,
         verbose=0,
         **model_kwargs,
     )
@@ -156,10 +153,10 @@ def main():
     # Environment params
     parser.add_argument("--n-envs", type=int, default=1)
     parser.add_argument("--render", action="store_true")
-    parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)
 
     # SAC defaults (used when Optuna disabled)
-    parser.add_argument("--timesteps", type=int, default=50_000)
+    parser.add_argument("--timesteps", type=int, default=5000)
     parser.add_argument("--learning-rate", type=float, default=5.95e-5)
     parser.add_argument("--buffer-size", type=int, default=50_000)
     parser.add_argument("--learning-starts", type=int, default=1000)
@@ -173,15 +170,19 @@ def main():
 
     # Policy
     parser.add_argument("--policy", default="MlpPolicy")
-    parser.add_argument("--policy-kwargs", type=parse_policy_kwargs,
-                        default="{'log_std_init': -3.67, 'net_arch': [64, 64]}")
 
     # Optuna knobs
     parser.add_argument("--optuna-trials", type=int, default=0, help=">0 to enable tuning")
     parser.add_argument("--eval-episodes", type=int, default=5, help="Episodes for evaluation during tuning")
     parser.add_argument("--seed", type=int, default=42)
-
+    n_stack = 10
     args = parser.parse_args()
+
+
+    # # used args
+    # print("args received :")
+    # for i, arg in enumerate(args, start=1):
+    #     print(f"Arg {i}: {arg}")
 
     if args.optuna_trials > 0:
         run_optuna(args)
@@ -206,7 +207,6 @@ def main():
             policy=args.policy,
             env=vec_env,
             learning_starts=args.learning_starts,
-            policy_kwargs=args.policy_kwargs,
             verbose=1,
             **model_kwargs,
             tensorboard_log="./logs/tensorboard",
@@ -218,8 +218,30 @@ def main():
         # Re‑learn with callbacks so progress shows
         model.learn(total_timesteps=500000, callback=[ckpt_cb, prog_cb])
         model.save("models/sac_smartdart_final")
-        # print(f"Finished training — mean eval reward: {mean_reward:.2f}")
 
 
+        # evaluation 
+        n_ep = 10
+        env = smartDartEnv(VITE_USim([0, 0]), None, render=False, n_parallel=1, n_stack=1, normalize=True, reward_shape=False)
+        total_reward = []
+        for i in range(n_ep):
+
+            obs, _ = env.reset()
+
+            # Rollout
+            reward_ep = 0
+            done = False
+            while not done:
+                # Use deterministic policy (no exploration noise)
+                action, _ = model.predict(obs, deterministic=True)
+                obs, reward, done, _, info = env.step(action)
+                reward_ep += reward
+                # env.render()  # optional
+
+            total_reward.append(reward_ep)
+            print(f"Episode {i} reward: {reward_ep:.2f}")
+
+        print(f"Episode {i} reward: {sum(total_reward)/n_ep:.2f}")
+            
 if __name__ == "__main__":
     main()

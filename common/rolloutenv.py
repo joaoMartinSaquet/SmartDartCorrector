@@ -13,6 +13,7 @@ from common.perturbation import *
 
 
 MAX_DISP = 40
+MAX_TS = 1e3
 GAME_PATH = "games/SmartDartEnvNormalized/smartDartEnv.x86_64"
 # GAME_PATH = "games/SmartDartPlusDist/smartDartEnv.x86_64"
 
@@ -276,7 +277,7 @@ def read_obs(obs, sb_env : bool):
 
 class smartDartEnv(gym.Env):
     # metadata = {'render.modes': ['human']}
-    def __init__(self, usim, perturbator=None, render = False, n_stack : int = 1, n_parallel=1, normalize: bool =False):
+    def __init__(self, usim, perturbator=None, render = False, n_stack : int = 1, n_parallel=1, normalize: bool =False, reward_shape: bool = True):
         super(smartDartEnv, self).__init__()
         base_obs_shape  = tuple(map(lambda x: x * n_stack, (2, )))
         self.action_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=base_obs_shape , dtype=np.float32)
@@ -289,7 +290,7 @@ class smartDartEnv(gym.Env):
         self.usim = usim
         self.perturbator = perturbator
         self.normalize = normalize
-
+        self.reward_shape = reward_shape
         self.info = {"episode" : 0}
         # self.click = 0
 
@@ -316,18 +317,38 @@ class smartDartEnv(gym.Env):
     def step(self, move_action):
         move_action = move_action
         game_obs, reward, done, info = self.godot_env.step(action_to_msg(move_action, self.click))
+
+        new_reward = 0
+        if self.reward_shape:
+            # the target has been hitted
+            if reward > 0:
+                new_reward = [10]
+            # out of board and reset
+            elif reward < 0:
+                new_reward = [-10]
+            # no progress we should remove the steps
+            elif reward == 0:
+                new_reward = [-0.005]
+
         game_obs = obs_handling(game_obs, self.sb)[0]
-        self.reward += reward
+
+        if self.reward_shape: 
+            reward = new_reward
+        self.reward += reward[0]
         move_action, self.click = self.usim.step(game_obs[:2], game_obs[2:], self.perturbator)
 
         if self.normalize:
             move_action = move_action / MAX_DISP
         self.observations.append(move_action)
         obs = self.get_obs()
+        self.ts += 1
+
+        done = self.ts >= MAX_TS or done
+
         info = {}
         if done:
             info["episode"] = {"r": self.reward, "l": self.ts}
-        self.ts += 1
+        
         return obs, reward[0], done, False, info
 
     def render(self):

@@ -75,3 +75,6 @@ games/
 
 # wandb logs
 wandb/
+
+
+*.zip
