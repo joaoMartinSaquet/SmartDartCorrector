@@ -27,7 +27,9 @@ from classic_rl.PPO import *
 
 import stable_baselines3 as sb3
 
-
+#### 
+#                                  DEPRECATED
+### 
 # steps where we say, that's enough reset yourselves
 MAXSTEPS =int(1e6)
 
