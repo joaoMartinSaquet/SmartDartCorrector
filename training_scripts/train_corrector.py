@@ -1,16 +1,24 @@
+from pathlib import Path
+import sys
+
+import pandas as pd
+from loguru import logger
+import wandb
+import pprint
+from functools import partial
 import argparse
+# ---------------------------------------------------------------------------
+# Repo‑local imports – SmartDart env
+# ---------------------------------------------------------------------------
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
 from common.rolloutenv import *
 from common.perturbation import *
 from classic_rl.rl_corrector import *
 from GA.cgp_corrector import *
-
-import wandb
-import pprint
-from functools import partial
-
-import pandas as pd
-from loguru import logger
-
 
 def train_rl_corrector_wandb(config = None, args=None):
     print("Starting Reinforcement Learning training...")
@@ -45,13 +53,13 @@ def train_rl_corrector_wandb(config = None, args=None):
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Train corrector using RL or CGP')
-    parser.add_argument('--method', choices=['rl', 'cgp'], required=True,
+    parser.add_argument('--method', choices=['rl', 'cgp'], required=True, default='cgp',
                        help='Choose training method: rl (Reinforcement Learning) or cgp (Cartesian Genetic Programming)')
     parser.add_argument('--perturbation_std', type=float, default=20.0,
                        help='Standard deviation for normal jittering perturbation (default: 20.0)')
-    parser.add_argument('--no_perturbation', action='store_true',
+    parser.add_argument('--no_perturbation', action='store_true', default=False,
                        help='Disable perturbation during training')
-    parser.add_argument('--wandb', action='store_true',
+    parser.add_argument('--wandb', action='store_true', default=False,
                        help='Enable wandb logging')
     global args
     args = parser.parse_args()
@@ -111,7 +119,7 @@ if __name__ == "__main__":
             raise ValueError(f"Unknown method: {args.method}")
         
         # env = StableBaselinesGodotEnv( n_parallel=n_parallel)
-        env = StableBaselinesGodotEnv(env_path="games/SmartDartSingleEnv/smartDartEnv.x86_64", show_window=False, n_parallel=n_parallel)
+        env = StableBaselinesGodotEnv(env_path="games/SmartDartEnvNormalized/smartDartEnv.x86_64", show_window=False, n_parallel=n_parallel)
 
         # Initialize user simulator
         u_sim = VITE_USim([0, 0])
@@ -143,10 +151,16 @@ if __name__ == "__main__":
                 reward_df.to_csv(file_name)
                 
             elif args.method == 'cgp':
+                fit_hist_last = []
                 ngen = 10
-                print("Starting Cartesian Genetic Programming training...")
-                corr = CGPCorrector(env, ngen, MAXSTEPS, 60, 1, perturbator)
-                log_dict = corr.learn(8, 96, random_genomes=True)
+                for n in range(ngen):
+                    print("Starting Cartesian Genetic Programming training...")
+                    corr = CGPCorrector(env, ngen, MAXSTEPS, 60, 1, perturbator)
+                    log_dict = corr.learn(8, 96, random_genomes=True)
+                    fit_hist_last.append(log_dict['fit_hist'][-1])
+                    logger.info(f"final reward of iteration {n+1} : {log_dict['fit_hist'][-1]}")
+                df = pd.DataFrame(fit_hist_last)
+                df.to_csv("10_usim_CGP_None.csv")
             else:
                 print(f"Unknown method: {args.method}")
 

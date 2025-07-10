@@ -45,7 +45,8 @@ def obs_handling(obs, sb_env):
     if sb_env:
         return obs["obs"]
     else:
-        return obs
+        # obs = np.array(obs"obs"])
+        return np.array(obs[0]["obs"])
 
 
 
@@ -84,7 +85,7 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
     else:
         observation, _ = env.reset(seed=seed)
     
-    obs = obs_handling(observation, sb)[0]
+    obs = obs_handling(observation, sb)
     xinit = np.array(obs[2:])
     
     u_simulator = VITE_USim(xinit)
@@ -129,7 +130,7 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
         else:
             observation, reward, done, info, _ = env.step(action)
 
-        obs = obs_handling(observation, sb)[0]
+        obs = obs_handling(observation, sb)
         # update reward list
         reward_list.append(reward)
 
@@ -305,7 +306,7 @@ class smartDartEnv(gym.Env):
         if self.normalize:
             move_action = move_action / MAX_DISP
         self.observations.clear()
-        for _ in range(len(self.observations)):
+        for _ in range(self.observations.maxlen):
             self.observations.append(np.zeros(move_action.shape))
         self.observations.append(move_action)
         obs = self.get_obs()

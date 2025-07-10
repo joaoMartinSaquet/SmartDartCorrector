@@ -35,6 +35,8 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from stable_baselines3.common.callbacks import CheckpointCallback, ProgressBarCallback
+import torch as th
+
 
 # ---------------------------------------------------------------------------
 # Repo‑local imports – SmartDart env
@@ -95,10 +97,10 @@ def make_vec_envs(n_envs: int, render: bool, normalize: bool, nstack: int = 1):
     return venv
 
 
-def train_once(args: argparse.Namespace, **model_kwargs) -> tuple[SAC, float]:
+def train_once(args: argparse.Namespace,nstack = 1, **model_kwargs) -> tuple[SAC, float]:
     """Train SAC once and return (model, mean_reward)."""
 
-    vec_env = make_vec_envs(args.n_envs, args.render, args.normalize)
+    vec_env = make_vec_envs(args.n_envs, args.render, args.normalize, nstack=nstack)
 
     model = SAC(
         policy=args.policy,
@@ -115,19 +117,19 @@ def train_once(args: argparse.Namespace, **model_kwargs) -> tuple[SAC, float]:
     return model, mean_reward
 
 
-def objective(trial: optuna.Trial, args: argparse.Namespace) -> float:
+def objective(trial: optuna.Trial, args: argparse.Namespace, n_stack = 1) -> float:
     params = sample_sac_params(trial)
-    model, mean_reward = train_once(args, **params)
+    model, mean_reward = train_once(args, **params, nstack=n_stack)
 
     # Track best model path for later retrieval
     trial.set_user_attr("mean_reward", mean_reward)
     return mean_reward  # maximise
 
 
-def run_optuna(args: argparse.Namespace):
+def run_optuna(args: argparse.Namespace, nstack = 1):
     sampler = TPESampler(seed=args.seed)
     study = optuna.create_study(direction="maximize", sampler=sampler)
-    study.optimize(lambda t: objective(t, args), n_trials=args.optuna_trials, show_progress_bar=True)
+    study.optimize(lambda t: objective(t, args, nstack), n_trials=args.optuna_trials, show_progress_bar=True)
 
     print("\n Best trial (#{}) — reward {:.2f}".format(study.best_trial.number, study.best_value))
     print("Best hyper‑parameters:\n" + "\n".join(f"  {k}: {v}" for k, v in study.best_trial.params.items()))
@@ -156,7 +158,7 @@ def main():
     parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)
 
     # SAC defaults (used when Optuna disabled)
-    parser.add_argument("--timesteps", type=int, default=5000)
+    parser.add_argument("--timesteps", type=int, default=1_500_000)
     parser.add_argument("--learning-rate", type=float, default=5.95e-5)
     parser.add_argument("--buffer-size", type=int, default=50_000)
     parser.add_argument("--learning-starts", type=int, default=1000)
@@ -165,7 +167,7 @@ def main():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--train-freq", type=int, default=100)
     parser.add_argument("--gradient-steps", type=int, default=64)
-    parser.add_argument("--ent-coef", type=float, default=0.01)
+    parser.add_argument("--ent-coef", type=float, default=0.01   )
     parser.add_argument("--use-sde", action=argparse.BooleanOptionalAction, default=True)
 
     # Policy
@@ -175,8 +177,14 @@ def main():
     parser.add_argument("--optuna-trials", type=int, default=0, help=">0 to enable tuning")
     parser.add_argument("--eval-episodes", type=int, default=5, help="Episodes for evaluation during tuning")
     parser.add_argument("--seed", type=int, default=42)
-    n_stack = 10
+    n_stack = 5
     args = parser.parse_args()
+
+    # Custom network architecture
+    policy_kwargs = dict(
+    net_arch=[256, 256],  # Two hidden layers of 256 units each
+    activation_fn=th.nn.Tanh,  # Use ReLU activation function
+    )
 
 
     # # used args
@@ -185,7 +193,7 @@ def main():
     #     print(f"Arg {i}: {arg}")
 
     if args.optuna_trials > 0:
-        run_optuna(args)
+        run_optuna(args, nstack=n_stack)
     else:
         # Single run with CLI hyper‑parameters
         model_kwargs = {
@@ -201,7 +209,7 @@ def main():
         }
 
         
-        vec_env = make_vec_envs(args.n_envs, args.render, args.normalize)
+        vec_env = make_vec_envs(args.n_envs, args.render, args.normalize, nstack=n_stack)
 
         model = SAC(
             policy=args.policy,
@@ -209,6 +217,7 @@ def main():
             learning_starts=args.learning_starts,
             verbose=1,
             **model_kwargs,
+            policy_kwargs=policy_kwargs,
             tensorboard_log="./logs/tensorboard",
         )
 
@@ -216,13 +225,13 @@ def main():
         ckpt_cb = CheckpointCallback(save_freq=5000, save_path="models/sac", name_prefix="sac_sd")
         prog_cb = ProgressBarCallback()
         # Re‑learn with callbacks so progress shows
-        model.learn(total_timesteps=500000, callback=[ckpt_cb, prog_cb])
+        model.learn(total_timesteps=args.timesteps, callback=[ckpt_cb, prog_cb])
         model.save("models/sac_smartdart_final")
 
 
         # evaluation 
         n_ep = 10
-        env = smartDartEnv(VITE_USim([0, 0]), None, render=False, n_parallel=1, n_stack=1, normalize=True, reward_shape=False)
+        env = smartDartEnv(VITE_USim([0, 0]), None, render=False, n_parallel=1, n_stack=n_stack, normalize=True, reward_shape=False)
         total_reward = []
         for i in range(n_ep):
 

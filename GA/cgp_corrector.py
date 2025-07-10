@@ -28,11 +28,15 @@ if not os.path.exists(LOG_PATH):
 FUN_LIB =  [CGPFunc(f_sum, 'sum', 2, 0, '+'),
             CGPFunc(f_aminus, 'aminus', 2, 0, '-'),
             CGPFunc(f_mult, 'mult', 2, 0, '*'),
-            CGPFunc(f_max, 'div', 2, 0, '/'),
-            # CGPFunc(f_gt, 'gt', 2, 0, '>'),
+            CGPFunc(f_div, 'div', 2, 0, '/'),
+            CGPFunc(f_gt, 'gt', 2, 0, '>'),
+            CGPFunc(f_lt, 'lt', 2, 0, '<'),
             CGPFunc(f_log, 'log', 1, 0, 'log'),
-            CGPFunc(f_sqrtxy, 'sqrtxy', 2, 0, 'sqt'),
-            CGPFunc(f_const, 'c', 0, 1, 'c')
+            CGPFunc(f_abs, 'abs', 2, 0, '||'),
+            CGPFunc(f_sin, 'sin', 1, 0, 'sin'),
+            CGPFunc(f_cos, 'cos', 1, 0, 'cos'),
+            CGPFunc(f_exp, 'exp', 0, 1, 'exp'),
+            CGPFunc(f_const, 'c', 0, 1, 'c'),
             ]
 
 
@@ -61,9 +65,13 @@ class CGPEvaluator(evaluators.Evaluator):
     def evaluate(self, cgp, it):
 
         individual_corr = cgp.run
+        while len(envs) < 0:
+            pass # wait till an environment is available
         env = envs.pop()
         rgathered, _= rolloutSmartDartEnv(env, self.nstep, self.perturbator, corrector = individual_corr, log = 0)
+        logger.debug(f"RolloutSmartDartEnv rgathered = {rgathered}")
         envs.append(env)
+        
         return rgathered
 
     
@@ -117,7 +125,7 @@ class CGPCorrector(Corrector):
 
         return out_equation
     
-    def learn(self, mu = 4, nb_ind = 4, num_csts = 1, 
+    def learn(self, mu = 4, nb_ind = 4, num_csts = 3, 
                mutation_rate_nodes = 0.2, mutation_rate_outputs=0.2, mutation_rate_const_params=0.01,
                n_cpus=6, n_it=500, folder_name=LOG_PATH, term_criteria=-np.inf, random_genomes=False):
         
