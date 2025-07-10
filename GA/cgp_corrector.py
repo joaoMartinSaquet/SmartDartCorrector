@@ -100,7 +100,7 @@ class CGPCorrector(Corrector):
         
         self.env = env
 
-        if isinstance(self.env, StableBaselinesGodotEnv) and self.env.num_envs > 1:
+        if self.env.num_envs > 1:
             self.sb = True
             # create the list of envs
             global envs

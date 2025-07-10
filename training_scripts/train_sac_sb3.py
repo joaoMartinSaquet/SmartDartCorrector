@@ -23,6 +23,8 @@ import sys
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict
+from loguru import logger
+
 
 # ---------------------------------------------------------------------------
 # Third‑party deps (installed separately)
@@ -46,12 +48,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from common.rolloutenv import smartDartEnv, VITE_USim  # noqa: E402  (after sys.path tweak)
+from common.perturbation import *
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_smartdart_env(render: bool = False, perturbator: Any | None = None, nstack: int = 1, normalize: bool = False):
+def make_smartdart_env(perturbator , render: bool = False, nstack: int = 1, normalize: bool = False):
     """Factory for a fresh SmartDartEnv wrapped with Monitor."""
     u_sim = VITE_USim([0, 0])
     env = smartDartEnv(u_sim, perturbator, render=render, n_parallel=1, n_stack=nstack, normalize=normalize)
@@ -91,8 +94,8 @@ def sample_sac_params(trial: optuna.Trial) -> Dict[str, Any]:
 # Main training / tuning routines
 # ---------------------------------------------------------------------------
 
-def make_vec_envs(n_envs: int, render: bool, normalize: bool, nstack: int = 1):
-    env_fn = partial(make_smartdart_env, render=render, nstack=nstack, normalize=normalize)
+def make_vec_envs(perturbator, n_envs: int, render: bool, normalize: bool, nstack: int = 1):
+    env_fn = partial(make_smartdart_env,perturbator, render=render, nstack=nstack, normalize=normalize)
     venv = DummyVecEnv([env_fn for _ in range(n_envs)])
     return venv
 
@@ -169,7 +172,8 @@ def main():
     parser.add_argument("--gradient-steps", type=int, default=64)
     parser.add_argument("--ent-coef", type=float, default=0.01   )
     parser.add_argument("--use-sde", action=argparse.BooleanOptionalAction, default=True)
-
+    parser.add_argument("--perturbator", choices=['None', 'Noise'], default='None')
+    
     # Policy
     parser.add_argument("--policy", default="MlpPolicy")
 
@@ -180,11 +184,27 @@ def main():
     n_stack = 5
     args = parser.parse_args()
 
+
+    logger.info("HYPERPARAMETERS")
+    for arg in vars(args):
+        logger.info(f"{arg}: {getattr(args, arg)}")
+
+
+
     # Custom network architecture
     policy_kwargs = dict(
     net_arch=[256, 256],  # Two hidden layers of 256 units each
     activation_fn=th.nn.Tanh,  # Use ReLU activation function
     )
+
+    perturbator = None
+    if args.perturbator == 'None':
+        perturbator = None
+    elif args.perturbator == 'RAM':
+        perturbator = None
+        logger.warning(f"Not implemented yet: {args.perturbator}")
+    elif args.perturbator == 'Noise':
+        perturbator = NormalJittering(0, 20)
 
 
     # # used args
@@ -209,7 +229,7 @@ def main():
         }
 
         
-        vec_env = make_vec_envs(args.n_envs, args.render, args.normalize, nstack=n_stack)
+        vec_env = make_vec_envs(perturbator, args.n_envs, args.render, args.normalize, nstack=n_stack)
 
         model = SAC(
             policy=args.policy,

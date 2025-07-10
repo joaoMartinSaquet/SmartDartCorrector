@@ -23,6 +23,7 @@ import sys
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict
+import loguru
 
 # ---------------------------------------------------------------------------
 # Third‑party deps (installed separately)
@@ -42,7 +43,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from common.rolloutenv import smartDartEnv, VITE_USim  # noqa: E402  (after sys.path tweak)
+from common.rolloutenv import smartDartEnv, VITE_USim # noqa: E402  (after sys.path tweak)
+from common.perturbation import *
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -88,8 +90,8 @@ def sample_ppo_params(trial: optuna.Trial) -> Dict[str, Any]:
 # Main training / tuning routines
 # ---------------------------------------------------------------------------
 
-def make_vec_envs(n_envs: int, render: bool, normalize: bool):
-    env_fn = partial(make_smartdart_env, render=render)
+def make_vec_envs(perturbator : Any | None, n_envs: int, render: bool, normalize: bool):
+    env_fn = partial(make_smartdart_env, render=render, perturbator=perturbator)
     venv = DummyVecEnv([env_fn for _ in range(n_envs)])
     if normalize:
         venv = VecNormalize(venv, norm_obs=True, norm_reward=False)
@@ -191,8 +193,18 @@ def main():
             "use_sde": args.use_sde,
         }
 
-        
-        vec_env = make_vec_envs(args.n_envs, args.render, args.normalize)
+
+
+        perturbator = None
+        if args.perturbator == 'None':
+            perturbator = None
+        elif logger.info.perturbator == 'RAM':
+            perturbator = None
+            logger.warning(f"Not implemented yet: {args.perturbator}")
+        elif args.perturbator == 'Noise':
+            perturbator = NormalJittering(0, 20)
+
+        vec_env = make_vec_envs(None, args.n_envs, args.render, args.normalize)
 
         model = PPO(
             policy=args.policy,
