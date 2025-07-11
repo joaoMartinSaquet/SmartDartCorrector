@@ -24,7 +24,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Dict
 from loguru import logger
-
+import time
 
 # ---------------------------------------------------------------------------
 # Third‑party deps (installed separately)
@@ -37,6 +37,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from stable_baselines3.common.callbacks import CheckpointCallback, ProgressBarCallback
+from stable_baselines3.common.logger import configure
 import torch as th
 
 
@@ -231,6 +232,11 @@ def main():
         
         vec_env = make_vec_envs(perturbator, args.n_envs, args.render, args.normalize, nstack=n_stack)
 
+        # create logger
+        path = f'logs_corrector/SAC_{time.strftime("%Y%m%d-%H%M%S")}/'
+        sb3_logger = configure(path, ["stdout", "csv", "tensorboard"])
+
+
         model = SAC(
             policy=args.policy,
             env=vec_env,
@@ -240,6 +246,7 @@ def main():
             policy_kwargs=policy_kwargs,
             tensorboard_log="./logs/tensorboard",
         )
+        model.set_logger(sb3_logger)
 
         # Callbacks / saving (only in non‑Optuna mode)
         ckpt_cb = CheckpointCallback(save_freq=5000, save_path="models/sac", name_prefix="sac_sd")
