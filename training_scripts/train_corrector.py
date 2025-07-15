@@ -26,7 +26,7 @@ def train_rl_corrector_wandb(config = None, args=None):
         perturbator = None
         print("Training without perturbation")
     else:
-        perturbator = NormalJittering(0, args.perturbation_std)
+        perturbator = NormalJittering(10, args.perturbation_std)
         print(f"Training with normal jittering (std={args.perturbation_std})")
 
     u_sim = VITE_USim([0, 0])
@@ -106,7 +106,7 @@ if __name__ == "__main__":
             perturbator = None
             print("Training without perturbation")
         else:
-            perturbator = NormalJittering(0, args.perturbation_std)
+            perturbator = NormalJittering(10, args.perturbation_std)
             print(f"Training with normal jittering (std={args.perturbation_std})")
 
         # Initialize the environment

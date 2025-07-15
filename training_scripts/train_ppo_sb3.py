@@ -202,7 +202,7 @@ def main():
             perturbator = None
             logger.warning(f"Not implemented yet: {args.perturbator}")
         elif args.perturbator == 'Noise':
-            perturbator = NormalJittering(0, 20)
+            perturbator = NormalJittering(10, 20)
 
         vec_env = make_vec_envs(None, args.n_envs, args.render, args.normalize)
 

@@ -79,15 +79,15 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
 
     num_envs = env.num_envs
     sb = isinstance(env, StableBaselinesGodotEnv)
-
+    player_positions = []
     if sb:
         observation = env.reset()
     else:
         observation, _ = env.reset(seed=seed)
     
-    obs = obs_handling(observation, sb)
+    obs = obs_handling(observation, sb)[0]
     xinit = np.array(obs[2:])
-    
+    player_positions.append(obs[2:])
     u_simulator = VITE_USim(xinit)
     
     perturbator = pertubator
@@ -130,7 +130,8 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
         else:
             observation, reward, done, info, _ = env.step(action)
 
-        obs = obs_handling(observation, sb)
+        obs = obs_handling(observation, sb)[0]
+        player_positions.append(obs[2:])
         # update reward list
         reward_list.append(reward)
 
@@ -143,7 +144,7 @@ def rolloutSmartDartEnv(env, Nstep, pertubator : Perturbator, corrector = None, 
             break
     if log > 0:
         logger.debug("RolloutSmartDartEnv reward list = ", np.sum(reward_list),)
-    return np.sum(reward_list), reward_list
+    return np.sum(reward_list), reward_list, player_positions
 
         
 
@@ -239,7 +240,7 @@ if __name__ == "__main__":
     
     N = 1
     # create a perturbation
-    # perturbator = NormalJittering(0, 20)
+    # perturbator = NormalJittering(10, 20)
     perturbator = None
 
     # create a corrector
@@ -278,15 +279,16 @@ def read_obs(obs, sb_env : bool):
 
 class smartDartEnv(gym.Env):
     # metadata = {'render.modes': ['human']}
-    def __init__(self, usim, perturbator=None, render = False, n_stack : int = 1, n_parallel=1, normalize: bool =False, reward_shape: bool = True):
+    def __init__(self, usim, perturbator=None, render = False, n_stack : int = 1, n_parallel=1, normalize: bool =False, reward_shape: bool = True, game_path = GAME_PATH, speedup = None):
         super(smartDartEnv, self).__init__()
         base_obs_shape  = tuple(map(lambda x: x * n_stack, (2, )))
-        self.action_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=base_obs_shape , dtype=np.float32)
+        self.action_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=(2, ) , dtype=np.float32)
         self.observation_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=base_obs_shape, dtype=np.float32)
-        self.godot_env = StableBaselinesGodotEnv(GAME_PATH, num_envs=n_parallel, show_window=render)
+        
+        self.godot_env = StableBaselinesGodotEnv(game_path, num_envs=n_parallel, show_window=render, speedup=speedup)
         self.sb = isinstance(self.godot_env, StableBaselinesGodotEnv)
 
-
+        self.player_positions = []
         self.observations = deque(maxlen=n_stack)
         self.usim = usim
         self.perturbator = perturbator
@@ -296,10 +298,13 @@ class smartDartEnv(gym.Env):
         # self.click = 0
 
     def reset(self, seed=None):
+        
+        self.player_positions.clear()
+
         game_obs = self.godot_env.reset()
         game_obs = obs_handling(game_obs, self.sb)[0]
         user_state_initial = np.array(game_obs[2:]) 
-
+        self.player_positions.append(game_obs[2:])
         self.usim.reset(user_state_initial)
         move_action, self.click =self.usim.step(game_obs[0:2], game_obs[2:], self.perturbator)
 
@@ -319,8 +324,14 @@ class smartDartEnv(gym.Env):
         move_action = move_action
         game_obs, reward, done, info = self.godot_env.step(action_to_msg(move_action, self.click))
 
+        game_obs = obs_handling(game_obs, self.sb)[0]
+        self.player_positions.append(game_obs[2:])
         new_reward = 0
         if self.reward_shape:
+            # get distance between target and player
+            dist = np.linalg.norm(game_obs[:2] - game_obs[2:])
+            # normalize the distance to not get too big negative rewards
+            dist /= 1e5
             # the target has been hitted
             if reward > 0:
                 new_reward = [10]
@@ -329,9 +340,8 @@ class smartDartEnv(gym.Env):
                 new_reward = [-10]
             # no progress we should remove the steps
             elif reward == 0:
-                new_reward = [-0.005]
+                new_reward = [-dist]
 
-        game_obs = obs_handling(game_obs, self.sb)[0]
 
         if self.reward_shape: 
             reward = new_reward

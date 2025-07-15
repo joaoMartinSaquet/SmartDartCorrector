@@ -56,7 +56,7 @@ def main(args):
         perturbator = None
         logger.warning(f"Not implemented yet: {args.perturbator}")
     elif args.perturbator == 'Noise':
-        perturbator = NormalJittering(0, 20)
+        perturbator = NormalJittering(10, 20)
 
     n_stack = args.nstack
     if n_stack <= 0:

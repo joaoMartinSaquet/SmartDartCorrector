@@ -1,6 +1,14 @@
+from pathlib import Path
+import sys
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import argparse
 from common.rolloutenv import *
 from common.perturbation import *
+
 from classic_rl.rl_corrector import *
 
 from godot_rl.core.godot_env import GodotEnv
@@ -9,12 +17,12 @@ import pandas as pd
 
 if __name__ == "__main__":
     
-    parser = argparse.ArgumentParser(description='Train corrector using RL or CGP')
+    parser = argparse.ArgumentParser(description='Run USIM and the environment')
     parser.add_argument('--perturbator', choices=['None', 'RAM', 'Noise'], required=True)
     parser.add_argument('--N', type=int, required=True)
     parser.add_argument('--perturbation_std', type=float, default=20.0,
                        help='Standard deviation for normal jittering perturbation (default: 20.0)')
-    parser.add_argument('--perturbation_bias', type=float, default=5,
+    parser.add_argument('--perturbation_bias', type=float, default=0,
                        help='bias ')
     
 
@@ -22,14 +30,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
     N = args.N
     # create a perturbation
-    # perturbator = NormalJittering(0, 20)
+    # perturbator = NormalJittering(10, 20)
     if args.perturbator == 'None':
         perturbator = None
         print("Training without perturbation")
     elif args.perturbator == 'RAM':
         print(f"Not implemented yet: {args.method}")
     elif args.perturbator == 'Noise':
-        perturbator = NormalJittering(10, args.perturbation_std)
+        perturbator = NormalJittering(args.perturbation_bias, args.perturbation_std)
         print(f"Training with normal jittering (std={args.perturbation_std})")
 
     # create a corrector
@@ -43,6 +51,7 @@ if __name__ == "__main__":
     print("env created")
     print("env number is : ", env.num_envs)
     print("RolloutMultiSmartDartEnv Env = ", env.envs[0])
+
     rewards = []
     for j in range(N):
         print("ep : ", j)
@@ -52,7 +61,8 @@ if __name__ == "__main__":
             r_sum, r_list = rolloutMultiSmartDartEnv(env, 10000, perturbator, corrector)
             # print("reward summ = ", r_summ[-1])
         else:
-            r_sum, r_list = rolloutSmartDartEnv(env, 10000, perturbator, corrector) 
+            r_sum, r_list, player_pos = rolloutSmartDartEnv(env, 10000, perturbator, corrector) 
+
         
 
         print("reward summ = ", r_sum)

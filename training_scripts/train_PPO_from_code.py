@@ -74,7 +74,7 @@ if __name__ == "__main__":
         N = 1
         for i in range(N):
             u_sim = VITE_USim([0, 0])
-            # perturbator = NormalJittering(0, 20)
+            # perturbator = NormalJittering(10, 20)
             perturbator = None
 
             env = smartDartEnv(u_sim, perturbator, render = False, n_parallel=1)
