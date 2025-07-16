@@ -179,14 +179,14 @@ def main():
     # SAC defaults (used when Optuna disabled)
     parser.add_argument("--timesteps", type=int, default=1_500_000)
     parser.add_argument("--learning-rate", type=float, default=3e-5)
-    parser.add_argument("--buffer-size", type=int, default=200_000)
+    parser.add_argument("--buffer-size", type=int, default=50_000)
     parser.add_argument("--learning-starts", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--tau", type=float, default=0.01)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--train-freq", type=int, default=100)
     parser.add_argument("--gradient-steps", type=int, default=100)
-    parser.add_argument("--ent-coef", type=float, default=0.01)
+    parser.add_argument("--ent-coef", type=str, default='auto')
     parser.add_argument("--use-sde", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--perturbator", choices=['None', 'Noise'], default='None')
     
@@ -274,7 +274,7 @@ def main():
 
         # evaluation 
         n_ep = 10
-        env = smartDartEnv(VITE_USim([0, 0]), None, render=False, n_parallel=1, n_stack=n_stack, normalize=args.normalize, reward_shape=False)
+        env = smartDartEnv(VITE_USim([0, 0]), perturbator, render=False, n_parallel=1, n_stack=n_stack, normalize=args.normalize, reward_shape=False)
         total_reward = []
         for i in range(n_ep):
 
