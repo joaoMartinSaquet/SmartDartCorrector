@@ -50,6 +50,9 @@ SmartDartCorrector/
     └── run_u_sim.py                  # User simulation runner
 ```
 
+
+
+
 ## 🚀 Getting Started
 
 ### 🔧 Prerequisites
@@ -57,6 +60,7 @@ SmartDartCorrector/
 - Python 3.8+
 - CUDA-compatible GPU (optional but recommended)
 - Godot Engine (for game environment)
+- pygrn installed if you want to use grns :  https://github.com/joaoMartinSaquet/pyGRN
 
 ### 📦 Installation
 
