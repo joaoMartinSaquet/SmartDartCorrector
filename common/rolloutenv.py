@@ -279,7 +279,7 @@ def read_obs(obs, sb_env : bool):
 
 class smartDartEnv(gym.Env):
     # metadata = {'render.modes': ['human']}
-    def __init__(self, usim, perturbator=None, render = False, n_stack : int = 1, n_parallel=1, normalize: bool =False, reward_shape: bool = True, game_path = GAME_PATH, speedup = None):
+    def __init__(self, usim=None, perturbator=None, render = False, n_stack : int = 1, n_parallel=1, normalize: bool =False, reward_shape: bool = True, game_path = GAME_PATH, speedup = None):
         super(smartDartEnv, self).__init__()
         base_obs_shape  = tuple(map(lambda x: x * n_stack, (2, )))
         self.action_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=(2, ) , dtype=np.float32)
@@ -309,7 +309,17 @@ class smartDartEnv(gym.Env):
         move_action, self.click =self.usim.step(game_obs[0:2], game_obs[2:], self.perturbator)
 
         if self.normalize:
-            move_action = move_action / MAX_DISP
+
+
+            dx = move_action[0]
+            dy = move_action[1]
+
+            mag = np.linalg.norm([dx, dy], 2)/MAX_DISP
+            theta = np.arctan2(dy, dx)
+
+            move_action = np.array([mag * np.cos(theta), mag * np.sin(theta)])
+            
+            # move_action = move_action / MAX_DISP
         self.observations.clear()
         for _ in range(self.observations.maxlen):
             self.observations.append(np.zeros(move_action.shape))
@@ -319,6 +329,10 @@ class smartDartEnv(gym.Env):
         self.reward = 0
         # self.info["episode"] = 0
         return obs, {}
+    
+    def close(self):
+        self.godot_env.close()
+        return super().close()
     
     def step(self, move_action):
         move_action = move_action
