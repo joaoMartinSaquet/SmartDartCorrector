@@ -1,0 +1,3 @@
+--2025-09-19 15:45:56--  https://www.geogebra.net/linux/office%40geogebra.org.gpg.key
+Resolving www.geogebra.net (www.geogebra.net)... failed: Name or service not known.
+wget: unable to resolve host address ‘www.geogebra.net’

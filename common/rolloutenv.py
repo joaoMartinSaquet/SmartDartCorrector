@@ -279,13 +279,16 @@ def read_obs(obs, sb_env : bool):
 
 class smartDartEnv(gym.Env):
     # metadata = {'render.modes': ['human']}
-    def __init__(self, usim=None, perturbator=None, render = False, n_stack : int = 1, n_parallel=1, normalize: bool =False, reward_shape: bool = True, game_path = GAME_PATH, speedup = None):
+    def __init__(self, usim=None, perturbator=None, render = False, n_stack : int = 1, n_parallel=1, normalize: bool =False, port = None, reward_shape = 1, game_path = GAME_PATH, speedup = None):
         super(smartDartEnv, self).__init__()
         base_obs_shape  = tuple(map(lambda x: x * n_stack, (2, )))
         self.action_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=(2, ) , dtype=np.float32)
         self.observation_space = spaces.Box(low=-MAX_DISP, high=MAX_DISP, shape=base_obs_shape, dtype=np.float32)
+        if port == None:
+            self.godot_env = StableBaselinesGodotEnv(game_path, num_envs=n_parallel, show_window=render, speedup=speedup)
+        else :
+            self.godot_env = StableBaselinesGodotEnv(game_path, num_envs=n_parallel, show_window=render, port=port, speedup=speedup)
         
-        self.godot_env = StableBaselinesGodotEnv(game_path, num_envs=n_parallel, show_window=render, speedup=speedup)
         self.sb = isinstance(self.godot_env, StableBaselinesGodotEnv)
 
         self.player_positions = []
@@ -341,7 +344,7 @@ class smartDartEnv(gym.Env):
         game_obs = obs_handling(game_obs, self.sb)[0]
         self.player_positions.append(game_obs[2:])
         new_reward = 0
-        if self.reward_shape:
+        if self.reward_shape ==1:
             # get distance between target and player
             dist = np.linalg.norm(game_obs[:2] - game_obs[2:])
             # normalize the distance to not get too big negative rewards
@@ -356,6 +359,10 @@ class smartDartEnv(gym.Env):
             elif reward == 0:
                 new_reward = [-dist]
 
+        if self.reward_shape == 2:
+            pass
+            # compute the variance of the positions of the player
+            # first we need to get 
 
         if self.reward_shape: 
             reward = new_reward
@@ -372,6 +379,8 @@ class smartDartEnv(gym.Env):
 
         info = {}
         if done:
+            # implement it here
+            # loog at the jittering 
             info["episode"] = {"r": self.reward, "l": self.ts}
         
         return obs, reward[0], done, False, info

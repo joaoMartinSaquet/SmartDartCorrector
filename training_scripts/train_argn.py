@@ -8,8 +8,8 @@ import wandb
 import pprint
 from functools import partial
 import argparse
-
-
+import matplotlib.pyplot as plt
+from multiprocessing import Queue, Manager
 
 # ---------------------------------------------------------------------------
 # Repo‑local imports – SmartDart env
@@ -23,6 +23,14 @@ from common.rolloutenv import *
 from common.perturbation import *
 # from GA.pyGRN.pygrn import problems, evolution, grns
 from agrn import  EATMuPlusLambda, gymProblem, GRN
+import socket
+
+def get_free_port():
+    s = socket.socket()
+    s.bind(('', 0))             # let OS pick a free port
+    port = s.getsockname()[1]   # get the port number
+    s.close()
+    return port
 
 from contextlib import contextmanager
 @contextmanager
@@ -36,7 +44,7 @@ def suppress_stdout():
             sys.stdout = old_stdout
 class grnSmartDart():
 
-    def __init__(self, start_nreg, perturbator, reward_shaping, normalize):
+    def __init__(self, n_envs, start_nreg, perturbator, reward_shaping, normalize):
         # super().__init__(env_info, env_name, max_ts)
 
         self.perturbator = perturbator
@@ -45,16 +53,16 @@ class grnSmartDart():
         self.nin = 2
         self.nout = 2
         self.nreg = start_nreg
+    
 
-        # self.env = smartDartEnv(VITE_USim(x_init=[0,0]), perturbator=self.perturbator, render=False, reward_shape=self.reward_shaping, normalize=self.normalize)
-
-
+        # self.env = smartDartEnv(VITE_USim(x_init=[0,0]), perturbator=self.perturbator, render=False, reward_shape=self.reward_shaping, normalize=self.normaliz
 
 
     def eval(self, genome):
 
-
-        env = smartDartEnv(VITE_USim(x_init=[0,0]), perturbator=self.perturbator, render=False, reward_shape=self.reward_shaping, normalize=self.normalize)
+        port = get_free_port()
+        env = smartDartEnv(VITE_USim(x_init=[0,0]), perturbator=self.perturbator, render=False, reward_shape=self.reward_shaping, normalize=self.normalize, port=port)
+        # env = env_queue.get(block=True)
 
         # print("environement created ", env)
         g = GRN(genome, self.nin, self.nout)
@@ -62,7 +70,7 @@ class grnSmartDart():
         g.warmup(25)
         
 
-        
+        # print("running the environment")
         obs, info = env.reset()
         fit = 0
         done = False
@@ -78,8 +86,9 @@ class grnSmartDart():
             if truncated or terminated: 
                 done = True
             # print("step, done = ", done)
-        env.close()
+        
         # print("fit = ", fit)
+        env.close()
         return fit, 
 
 def main(args):
@@ -99,20 +108,52 @@ def main(args):
     elif args.perturbator == 'Noise':
         perturbator = NormalJittering(10, 20)
 
-
-    global envs
-    envs = [smartDartEnv(VITE_USim([0, 0]), perturbator = perturbator, render = args.render, n_stack=args.nstack, normalize = args.normalize, reward_shape=True) for _ in range(args.n_envs)]
-    # set_env_pool(envs)
-
-
-
-    print("len envs ", len(envs))
-    p = grnSmartDart(0, perturbator, reward_shaping, normalize)
+    # global env_queue
+    # env_queue = Manager().Queue()
+    # for _ in range(2):
+    #     env = smartDartEnv(VITE_USim(x_init=[0,0]), perturbator=perturbator, render=False, reward_shape=reward_shaping, normalize=normalize)
+    #     env_queue.put(env)
+        
+    p = grnSmartDart(2, 0, perturbator, reward_shaping, normalize)
 
     e = EATMuPlusLambda(nin = p.nin, nout = p.nout, nreg=p.nreg)
 
-    alg, hist = e.run(100,p, 5, 5, multiproc=True, verbose=True)
+    alg, hist = e.run(5, p.eval, 5, 10, multiproc=True, verbose=True)
     e.visualize_evolutions()
+
+
+    print("best genome is ", alg[0])
+    test_environment = smartDartEnv(VITE_USim([0, 0]), perturbator = perturbator, render = args.render, n_stack=args.nstack, normalize = args.normalize, reward_shape=False)
+    
+    best = GRN(alg[0], p.nin, p.nout)
+    fits = []
+    for i in range(1):
+        
+        best.setup()
+        best.warmup(25)
+        obs, _ = test_environment.reset()
+        done = False
+        fit = 0
+        while not done:
+            best.set_input(obs)
+            best.step(10)
+            action = best.get_output() 
+            action = action*80 - 40
+            obs, reward, done, truncated, terminated, = test_environment.step(action)
+
+            fit += reward 
+            if truncated or terminated: 
+                done = True
+
+        fits.append(fit)
+
+    for f in fits:
+        print("tested fitness is : ", f)
+
+    pp = test_environment.player_positions
+    test_environment.close()
+    plt.plot(pp[:, 0], pp[:,1])
+    plt.show()
 
 if __name__ == "__main__":
     
