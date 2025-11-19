@@ -12,7 +12,7 @@ from common.user_simulator import *
 from common.perturbation import *
 
 
-MAX_DISP = 40
+MAX_DISP = 80
 MAX_TS = 1e3
 GAME_PATH = "games/SmartDartEnvNormalized/smartDartEnv.x86_64"
 # GAME_PATH = "games/SmartDartPlusDist/smartDartEnv.x86_64"
@@ -227,7 +227,7 @@ def action_to_msg(displacement, click, num_envs = 1):
     if torch.is_tensor(displacement):
         displacement = displacement.numpy()
 
-    displacement = np.clip(displacement, -MAX_DISP, MAX_DISP),
+    # displacement = np.clip(displacement, -MAX_DISP, MAX_DISP),
     action = np.insert(displacement, 0 , click)
     action = np.array([ action for _ in range(num_envs) ])
     return action
@@ -344,7 +344,7 @@ class smartDartEnv(gym.Env):
         game_obs = obs_handling(game_obs, self.sb)[0]
         self.player_positions.append(game_obs[2:])
         new_reward = 0
-        if self.reward_shape ==1:
+        if self.reward_shape ==True:
             # get distance between target and player
             dist = np.linalg.norm(game_obs[:2] - game_obs[2:])
             # normalize the distance to not get too big negative rewards

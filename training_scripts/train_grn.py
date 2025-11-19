@@ -73,7 +73,7 @@ class grnSmartDart(ReinforcementLearningTask):
             # mag *= MAX_DISP 
             # theta *= 2 * np.pi
             # action = np.array([mag * np.cos(theta), mag * np.sin(theta)])
-            action = action*80 - 40
+            # action = action*80 - 40
 
             obs, reward, done, truncated, _ = env.step(action)
 
@@ -107,11 +107,6 @@ def main(args):
         logger.info(f"{arg}: {getattr(args, arg)}")
 
     
-    # create the env poolof size num_worker
-    global envs
-    envs = [smartDartEnv(VITE_USim([0, 0]), perturbator = perturbator, render = args.render, n_stack=n_stack, normalize = args.normalize, reward_shape=True) for _ in range(num_worker)]
-    # set_env_pool(envs)
-    
     problem = grnSmartDart(env_info=create_env_info(envs[0]), env_name="SmartDartCorrector", max_ts = 500)
     
 
@@ -125,6 +120,7 @@ def main(args):
     test_env = smartDartEnv(VITE_USim([0, 0]), perturbator = perturbator, render = args.render, n_stack=n_stack, normalize = args.normalize, reward_shape=False)
     test_prob = grnSmartDart(env = test_env, env_info=create_env_info(test_env), env_name="SmartDartCorrector", max_ts = 1000)
     fits = []
+    pps = []
     for i in range(10):
         test_fit  = test_prob.eval(best_ind.grn)
         fits.append(test_fit)
